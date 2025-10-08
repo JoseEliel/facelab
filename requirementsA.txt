@@ -1,3 +1,4 @@
 gradio
 opencv-python
 numpy
+Pillow
