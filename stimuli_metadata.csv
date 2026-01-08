@@ -1,0 +1,7 @@
+image_name,emotion,sex,ethnicity,angle,face_type
+man_angry.png,angry,male,black,forward,human
+woman_disgusted.jpg,disgusted,female,caucasian,front-left,human
+woman_surprised.png,surprised,female,caucasian,front-right,human
+kid_surprised.jpg,surprised,female,caucasian,forward,ai
+woman2_happy.jpg,happy,female,black,forward,ai
+oldman_angry.jpg,angry,male,caucasian,forward,ai
