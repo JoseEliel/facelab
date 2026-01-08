@@ -7,22 +7,245 @@ import time
 import csv
 import uuid
 from datetime import datetime
-from PIL import Image
 
 # --- Configuration ---
 AI_FOLDER = "./AI"
 HUMAN_FOLDER = "./Human"
 CSV_FILE = "emotion_responses.csv"
+METADATA_FILE = "stimuli_metadata.csv"
 DEBLUR_DURATION_S = 10
+
+# Query param used in URLs like: https://.../app?pid=12345
+URL_PARAM_PARTICIPANT_ID = "pid"
+# Randomize emotion choice order per trial (can be overridden by URL param).
+RANDOMIZE_EMOTION_ORDER_DEFAULT = True
+RANDOMIZE_EMOTION_ORDER_PARAM = "randomize"
+
+# Label normalization defaults.
+UNKNOWN_LABEL = "unknown"
+UNKNOWN_CODE = 0
+
+# Filename parsing order from the RIGHT side. Extend if you encode more fields in filenames.
+# Example filename if you extend: "subject_happy_female_asian_front-left.png"
+FILENAME_FIELD_ORDER = ["emotion"]
+
+# Code mappings (edit here when your coding scheme changes).
+EMOTION_CODE_MAP = {
+    "happy": 1,
+    "sad": 2,
+    "angry": 3,
+    "surprised": 4,
+    "disgusted": 5,
+    "fearful": 6,
+    "neutral": 7,
+    "unknown": 0,
+}
+SEX_CODE_MAP = {
+    "male": 1,
+    "female": 2,
+    "other": 3,
+    "unknown": 0,
+}
+ETHNICITY_CODE_MAP = {
+    "caucasian": 1,
+    "black": 2,
+    "asian": 3,
+    "latino": 4,
+    "middle-eastern": 5,
+    "indigenous": 6,
+    "other": 7,
+    "unknown": 0,
+}
+ANGLE_CODE_MAP = {
+    "forward": 1,
+    "front-left": 2,
+    "front-right": 3,
+    "left": 4,
+    "right": 5,
+    "up": 6,
+    "down": 7,
+    "unknown": 0,
+}
+TYPE_CODE_MAP = {
+    "human": 1,
+    "ai": 2,
+    "unknown": 0,
+}
+
+CSV_HEADERS = [
+    "participant_id",
+    "session_id",
+    "image_name",
+    "image_source",
+    "face_type",
+    "face_type_code",
+    "correct_emotion",
+    "correct_emotion_code",
+    "face_sex",
+    "face_sex_code",
+    "face_ethnicity",
+    "face_ethnicity_code",
+    "face_angle",
+    "face_angle_code",
+    "selected_emotion",
+    "selected_emotion_code",
+    "accuracy",
+    "response_time_ms",
+    "button_order",
+    "timestamp",
+]
 
 # --- Data Structure ---
 class ImageData:
     """A simple class to hold information about each image."""
-    def __init__(self, path, source, emotion):
+    def __init__(self, path, source, emotion, sex=UNKNOWN_LABEL, ethnicity=UNKNOWN_LABEL, angle=UNKNOWN_LABEL, face_type=UNKNOWN_LABEL):
         self.path = path
         self.source = source
         self.emotion = emotion
+        self.sex = sex
+        self.ethnicity = ethnicity
+        self.angle = angle
+        self.face_type = face_type
         self.name = os.path.basename(path)
+
+# --- Helper Functions ---
+
+def normalize_label(value):
+    if value is None:
+        return ""
+    value = str(value).strip().lower()
+    value = value.replace(" ", "-")
+    return value
+
+def get_code(code_map, label):
+    label = normalize_label(label)
+    if not label:
+        return UNKNOWN_CODE
+    return code_map.get(label, UNKNOWN_CODE)
+
+def load_metadata(metadata_path):
+    if not os.path.exists(metadata_path):
+        return {}
+    metadata = {}
+    with open(metadata_path, newline='') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row.get("image_name") or row.get("filename") or row.get("image")
+            if not name:
+                continue
+            key = name.strip().lower()
+            entry = {
+                "emotion": normalize_label(row.get("emotion")),
+                "sex": normalize_label(row.get("sex")),
+                "ethnicity": normalize_label(row.get("ethnicity")),
+                "angle": normalize_label(row.get("angle")),
+                "face_type": normalize_label(row.get("face_type") or row.get("type") or row.get("source")),
+            }
+            metadata[key] = entry
+            stem = os.path.splitext(key)[0]
+            metadata.setdefault(stem, entry)
+    return metadata
+
+def parse_filename_fields(image_path):
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    parts = base_name.split('_')
+    if len(parts) < 2:
+        return {}
+    fields = {}
+    for field in FILENAME_FIELD_ORDER:
+        if not parts:
+            break
+        fields[field] = normalize_label(parts.pop())
+    return fields
+
+def resolve_field(metadata, filename_fields, key, default=UNKNOWN_LABEL):
+    value = ""
+    if metadata:
+        value = normalize_label(metadata.get(key))
+    if not value:
+        value = filename_fields.get(key, "")
+    return value or default
+
+def resolve_face_type(metadata, source):
+    if metadata:
+        face_type = metadata.get("face_type")
+        if face_type:
+            return normalize_label(face_type)
+    return normalize_label(source)
+
+def ensure_csv_file():
+    if not os.path.exists(CSV_FILE):
+        with open(CSV_FILE, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_HEADERS)
+        return CSV_FILE, ""
+
+    with open(CSV_FILE, newline='') as f:
+        reader = csv.reader(f)
+        existing_header = next(reader, None)
+    if existing_header != CSV_HEADERS:
+        base, ext = os.path.splitext(CSV_FILE)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_file = f"{base}_{timestamp}{ext or '.csv'}"
+        with open(new_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_HEADERS)
+        return new_file, f"Using new results file: {new_file}"
+
+    return CSV_FILE, ""
+
+def parse_randomize_param(value):
+    if value is None:
+        return None
+    value = str(value).strip().lower()
+    if value in ("0", "false", "no", "off"):
+        return False
+    if value in ("1", "true", "yes", "on"):
+        return True
+    return None
+
+def get_participant_id(request):
+    if request is None:
+        return ""
+    participant_id = request.query_params.get(URL_PARAM_PARTICIPANT_ID)
+    if participant_id is None:
+        return ""
+    return str(participant_id).strip()
+
+def scan_images():
+    images = []
+    emotions = set()
+    metadata = load_metadata(METADATA_FILE)
+    skipped = []
+
+    for folder, source in [(AI_FOLDER, "AI"), (HUMAN_FOLDER, "Human")]:
+        if not os.path.exists(folder):
+            continue
+        for filename in os.listdir(folder):
+            if not filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                continue
+            path = os.path.join(folder, filename)
+            meta_key = filename.lower()
+            meta = metadata.get(meta_key) or metadata.get(os.path.splitext(meta_key)[0]) or {}
+            filename_fields = parse_filename_fields(path)
+
+            emotion = resolve_field(meta, filename_fields, "emotion", "")
+            if not emotion or emotion == UNKNOWN_LABEL:
+                skipped.append(filename)
+                continue
+
+            sex = resolve_field(meta, filename_fields, "sex", UNKNOWN_LABEL)
+            ethnicity = resolve_field(meta, filename_fields, "ethnicity", UNKNOWN_LABEL)
+            angle = resolve_field(meta, filename_fields, "angle", UNKNOWN_LABEL)
+            face_type = resolve_face_type(meta, source) or UNKNOWN_LABEL
+
+            emotions.add(emotion)
+            images.append(ImageData(path, source, emotion, sex=sex, ethnicity=ethnicity, angle=angle, face_type=face_type))
+
+    if skipped:
+        print(f"[DEBUG] Skipped {len(skipped)} images without an emotion label.")
+
+    return images, emotions
 
 # --- Backend Functions ---
 
@@ -82,154 +305,164 @@ def crop_face(image_path, target_size=512):
     # 4. Convert to RGB for Gradio display
     return cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
 
-def initialize_experiment():
-    """Scans folders for images, creates dummy files if needed, and prepares the experiment state."""
-    # Create demo folders/images if missing
+def initialize_experiment(request: gr.Request):
+    """Scans folders for images and prepares the experiment state."""
     os.makedirs(AI_FOLDER, exist_ok=True)
     os.makedirs(HUMAN_FOLDER, exist_ok=True)
-    
-    images = []
-    emotions = set()
 
-    for folder, source in [(AI_FOLDER, "AI"), (HUMAN_FOLDER, "Human")]:
-        if not os.path.exists(folder): 
-            continue
-        for filename in os.listdir(folder):
-            if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-                parts = os.path.splitext(filename)[0].split('_')
-                if len(parts) < 2:
-                    continue
-                emotion = parts[-1].lower()
-                emotions.add(emotion)
-                path = os.path.join(folder, filename)
-                images.append(ImageData(path, source, emotion))
-
+    images, emotions = scan_images()
     if not images:
-        return None, "Error: No images found. Please add images to 'AI' and 'Human' folders with names like 'name_emotion.jpg'"
+        return None, "Error: No images found. Please add images to 'AI' and 'Human' folders.", gr.update(interactive=False)
+
+    sorted_emotions = sorted(list(emotions))
+    if not sorted_emotions:
+        return None, "Error: No valid emotion labels found in image names or metadata.", gr.update(interactive=False)
+
+    session_id = str(uuid.uuid4())
+    participant_id = get_participant_id(request)
+    if not participant_id:
+        participant_id = f"anon-{session_id}"
+        participant_msg = f"Participant ID: {participant_id} (auto-generated; add ?{URL_PARAM_PARTICIPANT_ID}=... to URL)"
+    else:
+        participant_msg = f"Participant ID: {participant_id}"
+
+    randomize_emotions = RANDOMIZE_EMOTION_ORDER_DEFAULT
+    if request is not None:
+        override = parse_randomize_param(request.query_params.get(RANDOMIZE_EMOTION_ORDER_PARAM))
+        if override is not None:
+            randomize_emotions = override
+
+    csv_file, csv_status = ensure_csv_file()
+    status_lines = [participant_msg]
+    if csv_status:
+        status_lines.append(csv_status)
 
     random.shuffle(images)
-    sorted_emotions = sorted(list(emotions))
-    # we only have 4 buttons; trim if more
-    sorted_emotions = sorted_emotions[:4] if sorted_emotions else ["happy", "sad", "angry", "surprised"]
-    
     initial_state = {
-        "user_id": str(uuid.uuid4()),
+        "participant_id": participant_id,
+        "session_id": session_id,
+        "csv_file": csv_file,
         "all_images": images,
         "emotions": sorted_emotions,
         "current_index": -1,
-        "start_time": None
+        "current_choices": [],
+        "randomize_emotions": randomize_emotions,
+        "start_time": None,
     }
-    
-    # Create the CSV file with headers if it doesn't exist
-    if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'user_id', 'image_name', 'image_source', 'correct_emotion', 
-                'selected_emotion', 'response_time_s', 'timestamp'
-            ])
-    
-    return initial_state, ""
+
+    return initial_state, "\n\n".join(status_lines), gr.update(interactive=True)
 
 def start_interface(state):
     """Hides instructions and shows the main experiment UI."""
-    num_emotions = len(state["emotions"])
-    button_updates = [gr.update(visible=True, value=state["emotions"][i]) for i in range(num_emotions)]
-    button_updates += [gr.update(visible=False)] * (4 - num_emotions) # Hide unused buttons
-
+    if not state:
+        return (
+            gr.update(visible=True),  # instructions_section
+            gr.update(visible=True),  # start_btn
+            gr.update(visible=False), # main_section
+        )
     return (
         gr.update(visible=False), # instructions_section
         gr.update(visible=False), # start_btn
         gr.update(visible=True),  # main_section
-        gr.update(visible=True),  # emotion_buttons_row
-        *button_updates
     )
 
 def show_next_image(state):
     """Loads the next image and updates the state."""
+    if not state:
+        return (
+            state,
+            None,
+            "No experiment state available.",
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
+
     state["current_index"] += 1
     index = state["current_index"]
 
-    num_emotions = len(state["emotions"])
-
     if index >= len(state["all_images"]):
-        btn_updates = [gr.update(visible=False, interactive=False)] * 4
         return (
             state, 
             None, 
             "Experiment complete! Thank you for participating.", 
             gr.update(visible=False),  # next_image_btn
-            gr.update(visible=False),  # emotion_buttons_row
-            *btn_updates
+            gr.update(visible=False),  # emotion_choice
         )
 
     image_data = state["all_images"][index]
     cropped_image = crop_face(image_data.path)
     
     if cropped_image is None:
-        btn_updates = [gr.update(visible=False, interactive=False)] * 4
         return (
             state, 
             None, 
             f"Error loading image: {image_data.name}", 
             gr.update(visible=True),   # show Next so user can skip the broken one
-            gr.update(visible=False), 
-            *btn_updates
+            gr.update(visible=False),  # emotion_choice
         )
 
-    state["start_time"] = time.time()
+    state["start_time"] = time.monotonic()
     print(f"[DEBUG] Showing image {index+1}/{len(state['all_images'])}: {image_data.name}")
 
-    # Enable only the number of active emotion buttons
-    button_interactivity = [gr.update(visible=True, interactive=True)] * num_emotions
-    button_interactivity += [gr.update(visible=False, interactive=False)] * (4 - num_emotions)
+    choices = list(state["emotions"])
+    if state.get("randomize_emotions"):
+        choices = random.sample(choices, k=len(choices))
+    state["current_choices"] = choices
 
     return (
         state, 
         cropped_image, 
         f"Image {index + 1} of {len(state['all_images'])}", 
         gr.update(visible=False), # hide Next until a choice is made
-        gr.update(visible=True),  # show emotion buttons row
-        *button_interactivity
+        gr.update(choices=choices, value=None, visible=True, interactive=True),
     )
 
-def on_emotion_click(state, selected_emotion):
-    """Handles emotion button click and records data, then shows Next."""
+def on_emotion_select(state, selected_emotion):
+    """Handles emotion selection and records data, then shows Next."""
+    if not state or not selected_emotion:
+        return gr.update(), gr.update()
+
+    selected_emotion = normalize_label(selected_emotion)
     # Try to save; don't let errors block UI updates
     try:
-        response_time = time.time() - (state.get("start_time") or time.time())
+        start_time = state.get("start_time") or time.monotonic()
+        response_time_ms = int(round((time.monotonic() - start_time) * 1000))
         image_data = state["all_images"][state["current_index"]]
-        with open(CSV_FILE, 'a', newline='') as f:
+        accuracy = "correct" if selected_emotion == image_data.emotion else "incorrect"
+        with open(state["csv_file"], 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                state["user_id"], image_data.name, image_data.source, image_data.emotion,
-                selected_emotion, f"{response_time:.4f}", datetime.now().isoformat()
+                state["participant_id"],
+                state["session_id"],
+                image_data.name,
+                image_data.source,
+                image_data.face_type,
+                get_code(TYPE_CODE_MAP, image_data.face_type),
+                image_data.emotion,
+                get_code(EMOTION_CODE_MAP, image_data.emotion),
+                image_data.sex,
+                get_code(SEX_CODE_MAP, image_data.sex),
+                image_data.ethnicity,
+                get_code(ETHNICITY_CODE_MAP, image_data.ethnicity),
+                image_data.angle,
+                get_code(ANGLE_CODE_MAP, image_data.angle),
+                selected_emotion,
+                get_code(EMOTION_CODE_MAP, selected_emotion),
+                accuracy,
+                response_time_ms,
+                "|".join(state.get("current_choices", [])),
+                datetime.now().isoformat(),
             ])
-        print(f"[DEBUG] Clicked '{selected_emotion}' for {image_data.name} in {response_time:.3f}s")
+        print(f"[DEBUG] Selected '{selected_emotion}' for {image_data.name} in {response_time_ms}ms")
     except Exception as e:
         print("-----------!! ERROR: Could not save data to CSV. !!-----------")
         print(e)
         print("----------------------------------------------------------------")
 
-    # Disable buttons and reveal Next
-    num_emotions = len(state["emotions"])
-    button_interactivity = [gr.update(interactive=False)] * num_emotions
-    button_interactivity += [gr.update()] * (4 - num_emotions)
-
     return (
-        gr.update(visible=False), # emotion_buttons_row
+        gr.update(visible=False, interactive=False), # emotion_choice
         gr.update(visible=True),  # next_image_btn
-        *button_interactivity
     )
-
-def on_emotion_click_idx(state, idx):
-    """Map a fixed button index to an emotion label."""
-    # Guard in case fewer than 4 emotions exist
-    if idx >= len(state["emotions"]):
-        print(f"[DEBUG] Ignored click for idx {idx}; only {len(state['emotions'])} emotions configured.")
-        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
-    selected_emotion = state["emotions"][idx]
-    return on_emotion_click(state, selected_emotion)
 
 # --- Gradio UI Layout ---
 with gr.Blocks(theme=gr.themes.Soft()) as app:
@@ -243,7 +476,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as app:
             ## Instructions
             1.  An image of a face will appear. It will start very blurry.
             2.  The image will gradually become clear over 10 seconds.
-            3.  As soon as you recognize the emotion, click the corresponding button below.
+            3.  As soon as you recognize the emotion, select the corresponding option below.
             4.  The image will become fully clear, and a "Next Image" button will appear.
             5.  Click "Next Image" to continue the study.
             
@@ -256,20 +489,14 @@ with gr.Blocks(theme=gr.themes.Soft()) as app:
     with gr.Column(visible=False) as main_section:
         image_display = gr.Image(label="", elem_id="image_display", height=400, width=400, interactive=False)
         progress_text = gr.Markdown("")
-
-        with gr.Row(visible=False) as emotion_buttons_row:
-            emotion_btn_1 = gr.Button(size="lg", interactive=True)
-            emotion_btn_2 = gr.Button(size="lg", interactive=True)
-            emotion_btn_3 = gr.Button(size="lg", interactive=True)
-            emotion_btn_4 = gr.Button(size="lg", interactive=True)
-            emotion_buttons = [emotion_btn_1, emotion_btn_2, emotion_btn_3, emotion_btn_4]
+        emotion_choice = gr.Radio(choices=[], label="Select the emotion", visible=False, interactive=True)
 
         next_image_btn = gr.Button("Next Image ▶", variant="secondary", visible=False)
 
     # --- Event Handlers ---
     app.load(
         fn=initialize_experiment,
-        outputs=[state, status_text]
+        outputs=[state, status_text, start_btn]
     ).then(
         fn=None,
         js=f"""() => {{
@@ -307,46 +534,28 @@ with gr.Blocks(theme=gr.themes.Soft()) as app:
     start_btn.click(
         fn=start_interface,
         inputs=[state],
-        outputs=[instructions_section, start_btn, main_section, emotion_buttons_row, *emotion_buttons]
+        outputs=[instructions_section, start_btn, main_section]
     ).then(
         fn=show_next_image,
         inputs=[state],
-        outputs=[state, image_display, progress_text, next_image_btn, emotion_buttons_row, *emotion_buttons]
+        outputs=[state, image_display, progress_text, next_image_btn, emotion_choice]
     ).then(
         fn=None,
         js="() => window.deblurImage()"
     )
 
-    # IMPORTANT: bind JS + Python in the SAME click call (no .then)
-    emotion_btn_1.click(
-        fn=lambda s: on_emotion_click_idx(s, 0),
-        inputs=[state],
-        outputs=[emotion_buttons_row, next_image_btn, *emotion_buttons],
-        js="() => window.unblurImmediately()"
-    )
-    emotion_btn_2.click(
-        fn=lambda s: on_emotion_click_idx(s, 1),
-        inputs=[state],
-        outputs=[emotion_buttons_row, next_image_btn, *emotion_buttons],
-        js="() => window.unblurImmediately()"
-    )
-    emotion_btn_3.click(
-        fn=lambda s: on_emotion_click_idx(s, 2),
-        inputs=[state],
-        outputs=[emotion_buttons_row, next_image_btn, *emotion_buttons],
-        js="() => window.unblurImmediately()"
-    )
-    emotion_btn_4.click(
-        fn=lambda s: on_emotion_click_idx(s, 3),
-        inputs=[state],
-        outputs=[emotion_buttons_row, next_image_btn, *emotion_buttons],
+    # IMPORTANT: bind JS + Python in the SAME change call (no .then)
+    emotion_choice.change(
+        fn=on_emotion_select,
+        inputs=[state, emotion_choice],
+        outputs=[emotion_choice, next_image_btn],
         js="() => window.unblurImmediately()"
     )
 
     next_image_btn.click(
         fn=show_next_image,
         inputs=[state],
-        outputs=[state, image_display, progress_text, next_image_btn, emotion_buttons_row, *emotion_buttons]
+        outputs=[state, image_display, progress_text, next_image_btn, emotion_choice]
     ).then(
         fn=None,
         js="() => window.deblurImage()"
@@ -356,4 +565,6 @@ if __name__ == "__main__":
     print("Starting Gradio app...")
     print("Please create two folders: './AI' and './Human'")
     print("Place images in them named like 'any_name_happy.jpg', 'some_face_sad.png', etc.")
+    print(f"Optional metadata file: '{METADATA_FILE}' with columns image_name, emotion, sex, ethnicity, angle, face_type.")
+    print(f"Participant ID via URL param '?{URL_PARAM_PARTICIPANT_ID}=...'")
     app.launch()
