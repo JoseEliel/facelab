@@ -25,6 +25,41 @@ CHOICE_PLACEHOLDER = "Select an emotion..."
 APP_CSS = f"""
 #emotion_choice, #emotion_choice .wrap {{ max-height: 260px; overflow-y: auto; }}
 #next_btn {{ margin: 8px 0 12px 0; }}
+#start_btn,
+#start_btn button,
+#start_btn .gr-button,
+#next_btn,
+#next_btn button,
+#next_btn .gr-button {{
+  font-size: 20px !important;
+  padding: 12px 22px !important;
+  min-height: 48px !important;
+}}
+#emotion_choice label,
+#emotion_choice .wrap label,
+#emotion_choice .wrap span {{
+  font-size: 20px !important;
+}}
+#emotion_choice .wrap {{
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 8px 12px;
+}}
+#emotion_choice .wrap label {{
+  justify-content: center;
+  width: auto;
+  margin: 4px 0;
+}}
+#emotion_choice input[type="radio"] {{
+  transform: scale(1.2);
+  margin-right: 8px;
+}}
+#emotion_choice .wrap label {{
+  padding: 8px 12px !important;
+}}
 
 @media (max-width: 640px) {{
   #img_anim img, #img_static img {{ max-height: 280px; object-fit: contain; }}
@@ -51,6 +86,25 @@ APP_CSS = f"""
     display: block;
     filter: blur(0px);
 }}
+
+#progress_text {{
+  font-size: 36px;
+  text-align: center;
+  line-height: 1.2;
+}}
+
+#app_title {{
+  text-align: center;
+  margin-bottom: 16px;
+}}
+
+#app_title h1,
+#app_title p {{
+  font-weight: 700;
+  font-size: 56px;
+  margin: 0;
+}}
+
 """
 
 # --- Constants & Mappings ---
@@ -58,7 +112,7 @@ UNKNOWN_LABEL = "unknown"
 UNKNOWN_CODE = 0
 FILENAME_FIELD_ORDER = ["emotion"]
 
-EMOTION_CODE_MAP = {"happy": 1, "sad": 2, "angry": 3, "surprised": 4, "disgusted": 5, "fearful": 6, "neutral": 7, "unknown": 0}
+EMOTION_CODE_MAP = {"happy": 1, "sad": 2, "fearful": 3, "exuberant": 4, "unknown": 0}
 SEX_CODE_MAP = {"male": 1, "female": 2, "other": 3, "unknown": 0}
 ETHNICITY_CODE_MAP = {"caucasian": 1, "black": 2, "asian": 3, "latino": 4, "middle-eastern": 5, "indigenous": 6, "other": 7, "unknown": 0}
 ANGLE_CODE_MAP = {"forward": 1, "front-left": 2, "front-right": 3, "left": 4, "right": 5, "up": 6, "down": 7, "unknown": 0}
@@ -277,7 +331,7 @@ def show_next_image(state):
     index = state["current_index"]
 
     if index >= len(state["all_images"]):
-        return state, None, None, "Experiment complete!", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+        return state, None, None, "# Experiment complete!", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
 
     image_data = state["all_images"][index]
     cropped_image = crop_face(image_data.path)
@@ -363,12 +417,12 @@ js_functions = """
 # --- Gradio App ---
 with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
     state = gr.State()
-    gr.Markdown("# Face Emotion Recognition Study")
+    gr.Markdown("Face Emotion Recognition Study", elem_id="app_title")
     
     # 1. Landing Page
     with gr.Column(visible=True) as instructions_section:
-        gr.Markdown(f"## Instructions\nIdentify the emotion as the image becomes clear ({DEBLUR_DURATION_S}s).")
-        start_btn = gr.Button("START STUDY", variant="primary")
+        gr.Markdown(f"# Instructions\n ## Identify the emotion as the image becomes clear ({DEBLUR_DURATION_S}s).")
+        start_btn = gr.Button("START STUDY", variant="primary", elem_id="start_btn")
         status_text = gr.Markdown("")
 
     # 2. Main Experiment Interface
@@ -380,7 +434,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
             # Static Image: Hidden initially, shows instantly when user selects answer
             image_static = gr.Image(label="", elem_id="img_static", height=400, width=400, interactive=False, show_label=False, visible=False)
         
-        progress_text = gr.Markdown("")
+        progress_text = gr.Markdown("", elem_id="progress_text")
         
         # Controls
         emotion_choice = gr.Radio(choices=[], label="Select the emotion", visible=False, interactive=True, elem_id="emotion_choice")
