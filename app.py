@@ -1,14 +1,18 @@
+import os
+os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
+
 import gradio as gr
 import cv2
 import numpy as np
-import os
 import random
 import time
 import csv
+import json
 import uuid
 import shutil
 from datetime import datetime
 from functools import partial
+from urllib import parse, request as urlrequest
 
 # --- Configuration ---
 AI_FOLDER = "./AI"
@@ -16,7 +20,6 @@ HUMAN_FOLDER = "./Human"
 PART1_CSV_FILE = "emotion_responses_part1.csv"
 PART2_CSV_FILE = "emotion_responses_part2.csv"
 METADATA_FILE = "stimuli_metadata.csv"
-DEBLUR_DURATION_S = 5  # Seconds to go from Blur -> Clear
 
 # --- Advanced Features Config ---
 URL_PARAM_PARTICIPANT_ID = "pid"
@@ -24,6 +27,9 @@ URL_PARAM_PARTICIPANT_ID = "pid"
 RANDOMIZE_EMOTION_ORDER_DEFAULT = False
 RANDOMIZE_EMOTION_ORDER_PARAM = "randomize"
 CHOICE_PLACEHOLDER = "Select an emotion..."
+TURNSTILE_SITE_KEY_ENV = "TURNSTILE_SITE_KEY"
+TURNSTILE_SECRET_KEY_ENV = "TURNSTILE_SECRET_KEY"
+TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 # --- Sampling Config ---
 BALANCE_SUBSET_DEFAULT = True
@@ -73,32 +79,6 @@ APP_CSS = f"""
   width: 100%;
   height: 100%;
   object-fit: contain;
-}}
-
-/* --- ANIMATED IMAGE (The Test) --- */
-/* 1. Start HEAVILY BLURRED by default */
-#img_anim img {{
-    filter: blur(50px); 
-    display: block;
-    transform: scale(1.0);
-}}
-
-/* 2. The JS adds this class to animate it to clear */
-.image-clear {{
-    transition: filter {DEBLUR_DURATION_S}s linear !important;
-    filter: blur(0px) !important;
-}}
-
-/* Snap instantly to clear when the participant selects an answer. */
-.image-snap {{
-    transition: none !important;
-    filter: blur(0px) !important;
-}}
-
-/* Force a blurred state immediately (used before loading the next image). */
-.image-preblur {{
-    transition: none !important;
-    filter: blur(50px) !important;
 }}
 
 #progress_text {{
@@ -189,6 +169,18 @@ APP_CSS = f"""
   margin: 0;
 }}
 
+#human_check_wrap {{
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}}
+
+#human_check_wrap .cf-turnstile {{
+  margin: 0 auto;
+}}
+
 """
 
 # --- Constants & Mappings ---
@@ -252,6 +244,8 @@ PART2_HEADERS = [
     "matching_timestamp",
 ]
 
+VERIFIED_SESSION_IDS = set()
+
 # --- Data Structure ---
 class ImageData:
     def __init__(
@@ -281,6 +275,76 @@ class ImageData:
 def normalize_label(value):
     if value is None: return ""
     return str(value).strip().lower().replace(" ", "-")
+
+def turnstile_site_key():
+    return os.getenv(TURNSTILE_SITE_KEY_ENV, "").strip()
+
+def turnstile_secret_key():
+    return os.getenv(TURNSTILE_SECRET_KEY_ENV, "").strip()
+
+def turnstile_is_enabled():
+    return bool(turnstile_site_key() and turnstile_secret_key())
+
+def turnstile_is_partially_configured():
+    return bool(turnstile_site_key()) ^ bool(turnstile_secret_key())
+
+def render_turnstile_widget():
+    if not turnstile_is_enabled():
+        return ""
+    site_key = turnstile_site_key()
+    return f"""
+<div id="human_check_wrap">
+  <div
+    class="cf-turnstile"
+    data-sitekey="{site_key}"
+    data-callback="onTurnstileSuccess"
+    data-expired-callback="onTurnstileExpired"
+    data-error-callback="onTurnstileError">
+  </div>
+</div>
+"""
+
+TURNSTILE_HEAD = """
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script>
+(() => {
+  function getTurnstileInput() {
+    return document.querySelector("#turnstile_token textarea, #turnstile_token input");
+  }
+
+  function dispatchTurnstileValue(value) {
+    const input = getTurnstileInput();
+    if (!input) return;
+    input.value = value || "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  window.onTurnstileSuccess = function(token) {
+    dispatchTurnstileValue(token);
+  };
+
+  window.onTurnstileExpired = function() {
+    dispatchTurnstileValue("");
+  };
+
+  window.onTurnstileError = function() {
+    dispatchTurnstileValue("");
+  };
+
+  window.resetTurnstileWidget = function() {
+    dispatchTurnstileValue("");
+    if (!window.turnstile) return;
+    document.querySelectorAll(".cf-turnstile").forEach((node) => {
+      try {
+        window.turnstile.reset(node);
+      } catch (_error) {
+      }
+    });
+  };
+})();
+</script>
+""" if turnstile_site_key() else None
 
 def canonicalize_emotion(label):
     norm = normalize_label(label)
@@ -436,6 +500,95 @@ def get_participant_id(request):
     pid = request.query_params.get(URL_PARAM_PARTICIPANT_ID)
     return str(pid).strip() if pid else ""
 
+def get_request_ip(request):
+    if request is None:
+        return ""
+    client = getattr(request, "client", None)
+    host = getattr(client, "host", None)
+    return str(host).strip() if host else ""
+
+def turnstile_status_text():
+    if turnstile_is_enabled():
+        return "Complete the human check to enable Start."
+    if turnstile_is_partially_configured():
+        return (
+            f"Turnstile is misconfigured. Set both `{TURNSTILE_SITE_KEY_ENV}` "
+            f"and `{TURNSTILE_SECRET_KEY_ENV}` to enable bot protection."
+        )
+    return (
+        f"Bot protection is currently off. Add `{TURNSTILE_SITE_KEY_ENV}` "
+        f"and `{TURNSTILE_SECRET_KEY_ENV}` to enable Cloudflare Turnstile."
+    )
+
+def verify_turnstile_token(token, request):
+    if not turnstile_is_enabled():
+        return True, ""
+
+    token = str(token or "").strip()
+    if not token:
+        return False, "Please complete the human check before starting."
+
+    payload = {
+        "secret": turnstile_secret_key(),
+        "response": token,
+    }
+    remote_ip = get_request_ip(request)
+    if remote_ip:
+        payload["remoteip"] = remote_ip
+
+    verify_request = urlrequest.Request(
+        TURNSTILE_VERIFY_URL,
+        data=parse.urlencode(payload).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with urlrequest.urlopen(verify_request, timeout=10) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        print(f"Turnstile verification request failed: {exc}")
+        return False, "Could not verify the human check. Please try again."
+
+    if body.get("success"):
+        return True, ""
+
+    error_codes = body.get("error-codes") or []
+    print(f"Turnstile verification failed: {error_codes}")
+    return False, "Human check expired or failed. Please try again."
+
+def is_verified_session(state):
+    if not turnstile_is_enabled():
+        return True
+    if not state:
+        return False
+    session_id = str(state.get("session_id") or "").strip()
+    return bool(session_id) and session_id in VERIFIED_SESSION_IDS and bool(state.get("human_verified"))
+
+def _blocked_start_response(state, message, start_interactive=False):
+    return (
+        state,
+        gr.update(visible=True),
+        gr.update(visible=True, interactive=start_interactive),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(),
+        gr.update(value=message),
+        gr.update(visible=False, interactive=False),
+        gr.update(value=""),
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False, interactive=False),
+    )
+
+def _blocked_main_response(state, message="Complete the human check to continue."):
+    return (
+        state,
+        gr.update(visible=False, interactive=False),
+        message,
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False, interactive=False),
+    )
+
 def scan_images():
     images = []
     emotions = set()
@@ -544,7 +697,12 @@ def initialize_experiment(request: gr.Request):
     images, emotions = scan_images()
     
     if not images:
-        return None, "Error: No images found.", gr.update(interactive=False)
+        return (
+            None,
+            "Error: No images found.",
+            gr.update(interactive=False),
+            gr.update(value=turnstile_status_text()),
+        )
 
     session_id = str(uuid.uuid4())
     participant_id = get_participant_id(request)
@@ -571,6 +729,7 @@ def initialize_experiment(request: gr.Request):
     initial_state = {
         "participant_id": participant_id,
         "session_id": session_id,
+        "human_verified": not turnstile_is_enabled(),
         "csv_file": csv_file_part1,
         "csv_file_part1": csv_file_part1,
         "csv_file_part2": csv_file_part2,
@@ -598,7 +757,16 @@ def initialize_experiment(request: gr.Request):
     random.shuffle(part2_images)
     initial_state["part2_images"] = part2_images
 
-    return initial_state, f"{msg}\n{csv_status}", gr.update(interactive=True)
+    if not turnstile_is_enabled():
+        VERIFIED_SESSION_IDS.add(session_id)
+
+    start_enabled = bool(images) and not turnstile_is_enabled() and not turnstile_is_partially_configured()
+    return (
+        initial_state,
+        f"{msg}\n{csv_status}",
+        gr.update(interactive=start_enabled),
+        gr.update(value=turnstile_status_text()),
+    )
 
 def start_interface(state):
     if not state: 
@@ -617,16 +785,77 @@ def start_interface(state):
         gr.update(visible=False),
     )
 
+def begin_study(state, turnstile_token, request: gr.Request):
+    if not state:
+        return _blocked_start_response(state, "Error: study state is missing.", start_interactive=False)
+
+    if turnstile_is_partially_configured():
+        return _blocked_start_response(
+            state,
+            f"Turnstile is misconfigured. Set both `{TURNSTILE_SITE_KEY_ENV}` and `{TURNSTILE_SECRET_KEY_ENV}`.",
+            start_interactive=False,
+        )
+
+    verified, message = verify_turnstile_token(turnstile_token, request)
+    if not verified:
+        return _blocked_start_response(
+            state,
+            message,
+            start_interactive=bool(str(turnstile_token or "").strip()),
+        )
+
+    session_id = str(state.get("session_id") or "").strip()
+    if session_id:
+        VERIFIED_SESSION_IDS.add(session_id)
+    state["human_verified"] = True
+
+    next_state, image_update, progress_value, choice_update, next_btn_update = show_next_image(state)
+    return (
+        next_state,
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=True),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(),
+        gr.update(value="Human check passed."),
+        image_update,
+        gr.update(value=progress_value),
+        choice_update,
+        next_btn_update,
+    )
+
+def on_turnstile_token_change(token):
+    if turnstile_is_partially_configured():
+        return (
+            gr.update(interactive=False),
+            gr.update(
+                value=(
+                    f"Turnstile is misconfigured. Set both `{TURNSTILE_SITE_KEY_ENV}` "
+                    f"and `{TURNSTILE_SECRET_KEY_ENV}`."
+                )
+            ),
+        )
+    if not turnstile_is_enabled():
+        return (
+            gr.update(interactive=True),
+            gr.update(value=turnstile_status_text()),
+        )
+
+    has_token = bool(str(token or "").strip())
+    return (
+        gr.update(interactive=has_token),
+        gr.update(
+            value="Human check complete. Click Start." if has_token else "Complete the human check to enable Start."
+        ),
+    )
+
 def show_next_image(state):
     # Returns: [state, img_anim_update, progress_text, choices_update, next_btn_update]
     if not state:
-        return (
-            state,
-            gr.update(visible=False, interactive=False),
-            "Error",
-            gr.update(visible=False, interactive=False),
-            gr.update(visible=False, interactive=False),
-        )
+        return _blocked_main_response(state, "Error")
+    if not is_verified_session(state):
+        return _blocked_main_response(state)
 
     state["current_index"] += 1
     index = state["current_index"]
@@ -680,6 +909,8 @@ def update_sections_for_phase(state):
     return gr.update(), gr.update(), gr.update()
 
 def start_part2(state):
+    if not is_verified_session(state):
+        return state
     if not state or state.get("phase") != "part2_instructions":
         return state
     state["phase"] = "part2"
@@ -691,6 +922,8 @@ def start_part2(state):
 
 def on_emotion_select(state, selected_emotion):
     # Returns: [state, image_update, choices_interactive, next_btn_interactive]
+    if not is_verified_session(state):
+        return state, gr.update(), gr.update(interactive=False), gr.update(interactive=False)
     if not state or not selected_emotion or normalize_label(selected_emotion) == normalize_label(CHOICE_PLACEHOLDER):
         # Do nothing if placeholder selected
         return state, gr.update(), gr.update(), gr.update()
@@ -744,6 +977,8 @@ def _to_int(value):
 
 def start_part2_phase(state):
     # Returns: [state, main_section, part2_section]
+    if not is_verified_session(state):
+        return state, gr.update(visible=False), gr.update(visible=False)
     if not state or state.get("phase") != "part2" or state.get("part2_started"):
         return state, gr.update(), gr.update()
     state["part2_started"] = True
@@ -780,6 +1015,8 @@ def _part2_reset_updates():
     )
 
 def show_next_part2_image(state):
+    if not is_verified_session(state):
+        return _no_part2_updates(state)
     if not state or state.get("phase") != "part2" or not state.get("part2_started"):
         return _no_part2_updates(state)
 
@@ -828,6 +1065,8 @@ def show_next_part2_image(state):
     )
 
 def _mark_part2_touched(state, _value, key):
+    if not is_verified_session(state):
+        return state, gr.update(interactive=False), gr.update("Complete the human check to continue."), gr.update()
     if not state or state.get("phase") != "part2" or not state.get("part2_started"):
         return state, gr.update(), gr.update(), gr.update()
     touched = dict(state.get("part2_touched") or {})
@@ -838,6 +1077,8 @@ def _mark_part2_touched(state, _value, key):
     return state, gr.update(interactive=ready), gr.update(message), gr.update()
 
 def advance_part2(state, age_rating, masc_rating, attr_rating, quality_rating, artifact_rating):
+    if not is_verified_session(state):
+        return _no_part2_updates(state)
     if not state or state.get("phase") != "part2" or not state.get("part2_started"):
         return _no_part2_updates(state)
 
@@ -924,65 +1165,23 @@ def advance_part2(state, age_rating, masc_rating, attr_rating, quality_rating, a
 
     return show_next_part2_image(state)
 
-# --- JAVASCRIPT ---
-# Logic: Find the animated image element, reset its class to remove 'image-clear',
-# force a reflow, then add 'image-clear' to start the transition.
-js_functions = """
-() => {
-    window.preBlur = function() {
-        const el = document.querySelector("#img_anim img");
-        if (!el) return;
-        // Immediately remove any clear/snap state and force a blurred render.
-        el.classList.remove("image-clear");
-        el.classList.remove("image-snap");
-        el.classList.add("image-preblur");
-        el.style.transition = "none";
-        el.style.filter = "blur(50px)";
-        void el.offsetWidth;
-    };
-
-    window.triggerDeblur = function() {
-        const el = document.querySelector("#img_anim img");
-        if (el) {
-            // Ensure we start from a blurred state, then animate to clear.
-            window.preBlur();
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    el.style.transition = "";
-                    el.style.filter = "";
-                    el.classList.remove("image-preblur");
-                    el.classList.add("image-clear");
-                });
-            });
-        }
-    };
-
-    window.snapClear = function() {
-        const el = document.querySelector("#img_anim img");
-        if (el) {
-            el.classList.remove('image-clear');
-            el.classList.add('image-snap');
-        }
-    };
-}
-"""
-
 # --- Gradio App ---
-with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
+with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
     state = gr.State()
     gr.Markdown("Face Emotion Recognition Study", elem_id="app_title")
     
     # 1. Landing Page
     with gr.Column(visible=True) as instructions_section:
-        gr.Markdown(f"# Instructions\n ## Identify the emotion as the image becomes clear ({DEBLUR_DURATION_S}s).")
-        start_btn = gr.Button("START STUDY", variant="primary", elem_id="start_btn")
+        gr.Markdown("# Instructions\n ## Identify the emotion shown in each face.")
+        turnstile_token = gr.Textbox(value="", visible="hidden", elem_id="turnstile_token", render=True)
+        human_check_widget = gr.HTML(render_turnstile_widget(), visible=turnstile_is_enabled())
+        human_check_status = gr.Markdown("")
+        start_btn = gr.Button("START STUDY", variant="primary", elem_id="start_btn", interactive=False)
         status_text = gr.Markdown("")
 
     # 2. Main Experiment Interface
     with gr.Column(visible=False) as main_section:
-        # Image Stack: Two images occupy the same conceptual space
         with gr.Group():
-            # Animated Image: Visible initially, performs blur->clear
             image_anim = gr.Image(label="", elem_id="img_anim", height=400, width=400, interactive=False, show_label=False, visible=True)
         
         progress_text = gr.Markdown("", elem_id="progress_text")
@@ -1051,29 +1250,43 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
     # --- Event Wiring ---
 
     # App Load
-    app.load(fn=initialize_experiment, outputs=[state, status_text, start_btn]).then(fn=None, js=js_functions)
+    app.load(
+        fn=initialize_experiment,
+        outputs=[state, status_text, start_btn, human_check_status],
+        api_visibility="private",
+    )
+
+    turnstile_token.change(
+        fn=on_turnstile_token_change,
+        inputs=[turnstile_token],
+        outputs=[start_btn, human_check_status],
+        show_progress="hidden",
+        api_visibility="private",
+    )
 
     # Start Button -> Show Interface -> Load First Image -> Trigger Animation
     start_btn.click(
-        fn=start_interface,
-        inputs=[state],
-        outputs=[instructions_section, start_btn, main_section, part2_instructions_section, part2_section],
-        show_progress="hidden",
-        js="() => window.preBlur && window.preBlur()",
-    ).then(
-        fn=show_next_image,
-        inputs=[state],
-        outputs=[state, image_anim, progress_text, emotion_choice, next_image_btn],
-    ).then(
-        fn=update_sections_for_phase,
-        inputs=[state],
+        fn=begin_study,
+        inputs=[state, turnstile_token],
         outputs=[
+            state,
+            instructions_section,
+            start_btn,
             main_section,
             part2_instructions_section,
             part2_section,
+            status_text,
+            human_check_status,
+            image_anim,
+            progress_text,
+            emotion_choice,
+            next_image_btn,
         ],
+        show_progress="hidden",
+        api_visibility="private",
     ).then(
-        fn=None, js="() => window.triggerDeblur()"
+        fn=None,
+        js="() => { if (window.resetTurnstileWidget) window.resetTurnstileWidget(); }",
     )
 
     # Emotion Selected -> Swap Images (Snap to Clear) -> Save Data
@@ -1082,8 +1295,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
         inputs=[state, emotion_choice], 
         outputs=[state, image_anim, emotion_choice, next_image_btn],
         show_progress="hidden",
-    ).then(
-        fn=None, js="() => window.snapClear()"
+        api_visibility="private",
     )
 
     # Next Button -> Load New Image -> Reset Layout -> Trigger Animation
@@ -1092,7 +1304,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
         inputs=[state],
         outputs=[state, image_anim, progress_text, emotion_choice, next_image_btn],
         show_progress="hidden",
-        js="() => window.preBlur && window.preBlur()",
+        api_visibility="private",
     ).then(
         fn=update_sections_for_phase,
         inputs=[state],
@@ -1101,8 +1313,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
             part2_instructions_section,
             part2_section,
         ],
-    ).then(
-        fn=None, js="() => window.triggerDeblur()"
+        api_visibility="private",
     )
 
     # Part 2 Start -> Show ratings block -> Load first rating image
@@ -1111,6 +1322,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
         inputs=[state],
         outputs=[state],
         show_progress="hidden",
+        api_visibility="private",
     ).then(
         fn=update_sections_for_phase,
         inputs=[state],
@@ -1119,6 +1331,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
             part2_instructions_section,
             part2_section,
         ],
+        api_visibility="private",
     ).then(
         fn=start_part2_phase,
         inputs=[state],
@@ -1127,6 +1340,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
             main_section,
             part2_section,
         ],
+        api_visibility="private",
     ).then(
         fn=show_next_part2_image,
         inputs=[state],
@@ -1143,6 +1357,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
             part2_artifact_radio,
             part2_next_btn,
         ],
+        api_visibility="private",
     )
 
     # Part 2 gating: require interaction with all five ratings
@@ -1151,30 +1366,35 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
         inputs=[state, part2_age_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        api_visibility="private",
     )
     part2_masc_radio.change(
         fn=partial(_mark_part2_touched, key="masc"),
         inputs=[state, part2_masc_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        api_visibility="private",
     )
     part2_attr_radio.change(
         fn=partial(_mark_part2_touched, key="attr"),
         inputs=[state, part2_attr_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        api_visibility="private",
     )
     part2_quality_radio.change(
         fn=partial(_mark_part2_touched, key="quality"),
         inputs=[state, part2_quality_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        api_visibility="private",
     )
     part2_artifact_radio.change(
         fn=partial(_mark_part2_touched, key="artifact"),
         inputs=[state, part2_artifact_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        api_visibility="private",
     )
 
     # Part 2 Next -> Save and advance
@@ -1195,6 +1415,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS) as app:
             part2_next_btn,
         ],
         show_progress="hidden",
+        api_visibility="private",
     )
 
 if __name__ == "__main__":
