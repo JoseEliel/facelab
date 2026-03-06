@@ -1478,5 +1478,4 @@ if __name__ == "__main__":
         css=APP_CSS,
         head=TURNSTILE_HEAD,
         footer_links=["gradio", "settings"],
-        ssr_mode=False,
     )
