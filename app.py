@@ -889,8 +889,10 @@ def on_turnstile_token_change(token):
 def show_next_image(state):
     # Returns: [state, img_anim_update, progress_text, choices_update, next_btn_update]
     if not state:
+        print("[DEBUG] show_next_image blocked: missing state")
         return _blocked_main_response(state, "Error")
     if not is_verified_session(state):
+        print("[DEBUG] show_next_image blocked: session not verified")
         return _blocked_main_response(state)
 
     state["current_index"] += 1
@@ -902,6 +904,7 @@ def show_next_image(state):
         state["part2_start_time"] = None
         state["part2_touched"] = {k: False for k in PART2_KEYS}
         state["phase"] = "part2_instructions"
+        print("[DEBUG] Transitioning to part2_instructions")
         return (
             state,
             gr.update(visible=False),
@@ -946,6 +949,7 @@ def update_sections_for_phase(state):
 def show_next_image_and_sections(state):
     next_state, image_update, progress_update, choice_update, next_btn_update = show_next_image(state)
     main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(next_state)
+    print(f"[DEBUG] show_next_image_and_sections phase={next_state.get('phase') if next_state else None}")
     return (
         next_state,
         image_update,
@@ -959,14 +963,17 @@ def show_next_image_and_sections(state):
 
 def start_part2(state):
     if not is_verified_session(state):
+        print("[DEBUG] start_part2 blocked: session not verified")
         return state
     if not state or state.get("phase") != "part2_instructions":
+        print(f"[DEBUG] start_part2 ignored: phase={state.get('phase') if state else None}")
         return state
     state["phase"] = "part2"
     state["part2_started"] = False
     state["part2_index"] = -1
     state["part2_start_time"] = None
     state["part2_touched"] = {k: False for k in PART2_KEYS}
+    print("[DEBUG] start_part2 set phase=part2")
     return state
 
 def on_emotion_select(state, selected_emotion):
@@ -1026,20 +1033,28 @@ def _to_int(value):
 def start_part2_phase(state):
     # Returns: [state, main_section, part2_section]
     if not is_verified_session(state):
+        print("[DEBUG] start_part2_phase blocked: session not verified")
         return state, gr.update(visible=False), gr.update(visible=False)
     if not state or state.get("phase") != "part2" or state.get("part2_started"):
+        print(
+            f"[DEBUG] start_part2_phase ignored: phase={state.get('phase') if state else None}, "
+            f"part2_started={state.get('part2_started') if state else None}"
+        )
         return state, gr.update(), gr.update()
     state["part2_started"] = True
     state["part2_index"] = -1
     state["part2_start_time"] = None
     state["part2_touched"] = {k: False for k in PART2_KEYS}
+    print("[DEBUG] start_part2_phase activated")
     return state, gr.update(visible=False), gr.update(visible=True)
 
 def begin_part2(state):
+    print(f"[DEBUG] begin_part2 called with phase={state.get('phase') if state else None}")
     next_state = start_part2(state)
     next_state, _, _ = start_part2_phase(next_state)
     main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(next_state)
     part2_outputs = show_next_part2_image(next_state)
+    print(f"[DEBUG] begin_part2 returning phase={part2_outputs[0].get('phase') if part2_outputs[0] else None}")
     return (
         part2_outputs[0],
         main_update,
@@ -1077,8 +1092,13 @@ def _part2_reset_updates():
 
 def show_next_part2_image(state):
     if not is_verified_session(state):
+        print("[DEBUG] show_next_part2_image blocked: session not verified")
         return _no_part2_updates(state)
     if not state or state.get("phase") != "part2" or not state.get("part2_started"):
+        print(
+            f"[DEBUG] show_next_part2_image ignored: phase={state.get('phase') if state else None}, "
+            f"part2_started={state.get('part2_started') if state else None}"
+        )
         return _no_part2_updates(state)
 
     images = state.get("part2_images") or state.get("all_images") or []
@@ -1087,6 +1107,7 @@ def show_next_part2_image(state):
 
     if index >= len(images):
         state["phase"] = "complete"
+        print("[DEBUG] Part 2 complete")
         completion_md = "# ✅\n## Complete!"
         return (
             state,
@@ -1105,11 +1126,13 @@ def show_next_part2_image(state):
     image_data = images[index]
     cropped_image = crop_face(image_data.path)
     if cropped_image is None:
+        print(f"[DEBUG] show_next_part2_image skipping unreadable image: {image_data.path}")
         return show_next_part2_image(state)
 
     state["part2_start_time"] = time.monotonic()
     state["part2_touched"] = {k: False for k in PART2_KEYS}
     reset_updates = _part2_reset_updates()
+    print(f"[DEBUG] Showing Part 2 image {index + 1} of {len(images)}: {image_data.path}")
 
     return (
         state,
