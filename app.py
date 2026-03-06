@@ -10,7 +10,6 @@ import csv
 import json
 import uuid
 import shutil
-import inspect
 from datetime import datetime
 from functools import partial
 from urllib import parse, request as urlrequest
@@ -229,22 +228,6 @@ APP_CSS = f"""
   margin: 0 auto;
 }}
 
-#turnstile_token,
-#turnstile_token textarea,
-#turnstile_token input {{
-  display: none !important;
-  visibility: hidden !important;
-  width: 0 !important;
-  min-width: 0 !important;
-  height: 0 !important;
-  min-height: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  border: 0 !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}}
-
 """
 
 # --- Constants & Mappings ---
@@ -305,6 +288,8 @@ PART2_HEADERS = [
     "match_artifact_rating",
     "matching_timestamp",
 ]
+
+VERIFIED_SESSION_IDS = set()
 
 # --- Data Structure ---
 class ImageData:
@@ -407,45 +392,6 @@ TURNSTILE_HEAD = """
 """ if turnstile_site_key() else None
 
 APP_THEME = gr.themes.Soft()
-
-def gradio_major_version():
-    raw_version = str(getattr(gr, "__version__", "0"))
-    try:
-        return int(raw_version.split(".", 1)[0])
-    except Exception:
-        return 0
-
-def supported_kwargs(callable_obj, **kwargs):
-    try:
-        params = inspect.signature(callable_obj).parameters
-    except (TypeError, ValueError):
-        return kwargs
-    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
-        return kwargs
-    return {key: value for key, value in kwargs.items() if key in params}
-
-def blocks_kwargs():
-    if gradio_major_version() >= 6:
-        return {}
-    return supported_kwargs(
-        gr.Blocks,
-        theme=APP_THEME,
-        css=APP_CSS,
-        head=TURNSTILE_HEAD,
-    )
-
-def launch_kwargs(launch_fn):
-    kwargs = {"show_api": False}
-    if gradio_major_version() >= 6:
-        kwargs.update(
-            theme=APP_THEME,
-            css=APP_CSS,
-            head=TURNSTILE_HEAD,
-        )
-    return supported_kwargs(launch_fn, **kwargs)
-
-def event_kwargs(event_fn, **kwargs):
-    return supported_kwargs(event_fn, **kwargs)
 
 def canonicalize_emotion(label):
     norm = normalize_label(label)
@@ -662,7 +608,8 @@ def is_verified_session(state):
         return True
     if not state:
         return False
-    return bool(state.get("human_verified"))
+    session_id = str(state.get("session_id") or "").strip()
+    return bool(session_id) and session_id in VERIFIED_SESSION_IDS and bool(state.get("human_verified"))
 
 def _blocked_start_response(state, message, start_interactive=False):
     return (
@@ -857,6 +804,9 @@ def initialize_experiment(request: gr.Request):
     random.shuffle(part2_images)
     initial_state["part2_images"] = part2_images
 
+    if not turnstile_is_enabled():
+        VERIFIED_SESSION_IDS.add(session_id)
+
     start_enabled = bool(images) and not turnstile_is_enabled() and not turnstile_is_partially_configured()
     return (
         initial_state,
@@ -901,6 +851,9 @@ def begin_study(state, turnstile_token, request: gr.Request):
             start_interactive=bool(str(turnstile_token or "").strip()),
         )
 
+    session_id = str(state.get("session_id") or "").strip()
+    if session_id:
+        VERIFIED_SESSION_IDS.add(session_id)
     state["human_verified"] = True
 
     next_state, image_update, progress_value, choice_update, next_btn_update = show_next_image(state)
@@ -947,10 +900,8 @@ def on_turnstile_token_change(token):
 def show_next_image(state):
     # Returns: [state, img_anim_update, progress_text, choices_update, next_btn_update]
     if not state:
-        print("[DEBUG] show_next_image blocked: missing state")
         return _blocked_main_response(state, "Error")
     if not is_verified_session(state):
-        print("[DEBUG] show_next_image blocked: session not verified")
         return _blocked_main_response(state)
 
     state["current_index"] += 1
@@ -962,7 +913,6 @@ def show_next_image(state):
         state["part2_start_time"] = None
         state["part2_touched"] = {k: False for k in PART2_KEYS}
         state["phase"] = "part2_instructions"
-        print("[DEBUG] Transitioning to part2_instructions")
         return (
             state,
             gr.update(visible=False),
@@ -1007,7 +957,6 @@ def update_sections_for_phase(state):
 def show_next_image_and_sections(state):
     next_state, image_update, progress_update, choice_update, next_btn_update = show_next_image(state)
     main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(next_state)
-    print(f"[DEBUG] show_next_image_and_sections phase={next_state.get('phase') if next_state else None}")
     return (
         next_state,
         image_update,
@@ -1018,21 +967,6 @@ def show_next_image_and_sections(state):
         part2_instructions_update,
         part2_section_update,
     )
-
-def start_part2(state):
-    if not is_verified_session(state):
-        print("[DEBUG] start_part2 blocked: session not verified")
-        return state
-    if not state or state.get("phase") != "part2_instructions":
-        print(f"[DEBUG] start_part2 ignored: phase={state.get('phase') if state else None}")
-        return state
-    state["phase"] = "part2"
-    state["part2_started"] = False
-    state["part2_index"] = -1
-    state["part2_start_time"] = None
-    state["part2_touched"] = {k: False for k in PART2_KEYS}
-    print("[DEBUG] start_part2 set phase=part2")
-    return state
 
 def on_emotion_select(state, selected_emotion):
     # Returns: [state, image_update, choices_interactive, next_btn_interactive]
@@ -1088,36 +1022,38 @@ def _to_int(value):
 
 # --- Part 2: Face Rating Logic ---
 
-def start_part2_phase(state):
-    # Returns: [state, main_section, part2_section]
+def begin_part2(state):
+    main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(state)
     if not is_verified_session(state):
-        print("[DEBUG] start_part2_phase blocked: session not verified")
-        return state, gr.update(visible=False), gr.update(visible=False)
-    if not state or state.get("phase") != "part2" or state.get("part2_started"):
-        print(
-            f"[DEBUG] start_part2_phase ignored: phase={state.get('phase') if state else None}, "
-            f"part2_started={state.get('part2_started') if state else None}"
+        empty_updates = _no_part2_updates(state)
+        return (
+            state,
+            main_update,
+            part2_instructions_update,
+            part2_section_update,
+            *empty_updates[1:],
         )
-        return state, gr.update(), gr.update()
+    if not state or state.get("phase") != "part2_instructions":
+        empty_updates = _no_part2_updates(state)
+        return (
+            state,
+            main_update,
+            part2_instructions_update,
+            part2_section_update,
+            *empty_updates[1:],
+        )
+
+    state["phase"] = "part2"
     state["part2_started"] = True
     state["part2_index"] = -1
     state["part2_start_time"] = None
     state["part2_touched"] = {k: False for k in PART2_KEYS}
-    print("[DEBUG] start_part2_phase activated")
-    return state, gr.update(visible=False), gr.update(visible=True)
-
-def begin_part2(state):
-    print(f"[DEBUG] begin_part2 called with phase={state.get('phase') if state else None}")
-    next_state = start_part2(state)
-    next_state, _, _ = start_part2_phase(next_state)
-    main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(next_state)
-    part2_outputs = show_next_part2_image(next_state)
-    print(f"[DEBUG] begin_part2 returning phase={part2_outputs[0].get('phase') if part2_outputs[0] else None}")
+    part2_outputs = show_next_part2_image(state)
     return (
         part2_outputs[0],
-        main_update,
-        part2_instructions_update,
-        part2_section_update,
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=True),
         *part2_outputs[1:],
     )
 
@@ -1150,13 +1086,8 @@ def _part2_reset_updates():
 
 def show_next_part2_image(state):
     if not is_verified_session(state):
-        print("[DEBUG] show_next_part2_image blocked: session not verified")
         return _no_part2_updates(state)
     if not state or state.get("phase") != "part2" or not state.get("part2_started"):
-        print(
-            f"[DEBUG] show_next_part2_image ignored: phase={state.get('phase') if state else None}, "
-            f"part2_started={state.get('part2_started') if state else None}"
-        )
         return _no_part2_updates(state)
 
     images = state.get("part2_images") or state.get("all_images") or []
@@ -1165,7 +1096,6 @@ def show_next_part2_image(state):
 
     if index >= len(images):
         state["phase"] = "complete"
-        print("[DEBUG] Part 2 complete")
         completion_md = "# ✅\n## Complete!"
         return (
             state,
@@ -1184,13 +1114,11 @@ def show_next_part2_image(state):
     image_data = images[index]
     cropped_image = crop_face(image_data.path)
     if cropped_image is None:
-        print(f"[DEBUG] show_next_part2_image skipping unreadable image: {image_data.path}")
         return show_next_part2_image(state)
 
     state["part2_start_time"] = time.monotonic()
     state["part2_touched"] = {k: False for k in PART2_KEYS}
     reset_updates = _part2_reset_updates()
-    print(f"[DEBUG] Showing Part 2 image {index + 1} of {len(images)}: {image_data.path}")
 
     return (
         state,
@@ -1308,20 +1236,14 @@ def advance_part2(state, age_rating, masc_rating, attr_rating, quality_rating, a
     return show_next_part2_image(state)
 
 # --- Gradio App ---
-with gr.Blocks(**blocks_kwargs()) as app:
+with gr.Blocks() as app:
     state = gr.State()
     gr.Markdown("Face Emotion Recognition Study", elem_id="app_title")
     
     # 1. Landing Page
     with gr.Column(visible=True) as instructions_section:
         gr.Markdown("# Instructions\n ## Identify the emotion shown in each face.")
-        turnstile_token = gr.Textbox(
-            value="",
-            visible="hidden",
-            container=False,
-            elem_id="turnstile_token",
-            render=True,
-        )
+        turnstile_token = gr.Textbox(value="", visible="hidden", elem_id="turnstile_token", render=True)
         human_check_widget = gr.HTML(render_turnstile_widget(), visible=turnstile_is_enabled())
         human_check_status = gr.Markdown("")
         start_btn = gr.Button("START STUDY", variant="primary", elem_id="start_btn", interactive=False)
@@ -1401,14 +1323,15 @@ with gr.Blocks(**blocks_kwargs()) as app:
     app.load(
         fn=initialize_experiment,
         outputs=[state, status_text, start_btn, human_check_status],
-        **event_kwargs(app.load, show_api=False),
+        api_visibility="private",
     )
 
     turnstile_token.change(
         fn=on_turnstile_token_change,
         inputs=[turnstile_token],
         outputs=[start_btn, human_check_status],
-        **event_kwargs(turnstile_token.change, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
 
     # Start Button -> Show Interface -> Load First Image -> Trigger Animation
@@ -1429,7 +1352,8 @@ with gr.Blocks(**blocks_kwargs()) as app:
             emotion_choice,
             next_image_btn,
         ],
-        **event_kwargs(start_btn.click, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     ).then(
         fn=None,
         js="() => { if (window.resetTurnstileWidget) window.resetTurnstileWidget(); }",
@@ -1440,7 +1364,8 @@ with gr.Blocks(**blocks_kwargs()) as app:
         fn=on_emotion_select, 
         inputs=[state, emotion_choice], 
         outputs=[state, image_anim, emotion_choice, next_image_btn],
-        **event_kwargs(emotion_choice.change, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
 
     # Next Button -> Load New Image -> Reset Layout -> Trigger Animation
@@ -1457,7 +1382,8 @@ with gr.Blocks(**blocks_kwargs()) as app:
             part2_instructions_section,
             part2_section,
         ],
-        **event_kwargs(next_image_btn.click, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
 
     # Part 2 Start -> Show ratings block -> Load first rating image
@@ -1480,7 +1406,8 @@ with gr.Blocks(**blocks_kwargs()) as app:
             part2_artifact_radio,
             part2_next_btn,
         ],
-        **event_kwargs(part2_start_btn.click, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
 
     # Part 2 gating: require interaction with all five ratings
@@ -1488,31 +1415,36 @@ with gr.Blocks(**blocks_kwargs()) as app:
         fn=partial(_mark_part2_touched, key="age"),
         inputs=[state, part2_age_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        **event_kwargs(part2_age_radio.change, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
     part2_masc_radio.change(
         fn=partial(_mark_part2_touched, key="masc"),
         inputs=[state, part2_masc_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        **event_kwargs(part2_masc_radio.change, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
     part2_attr_radio.change(
         fn=partial(_mark_part2_touched, key="attr"),
         inputs=[state, part2_attr_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        **event_kwargs(part2_attr_radio.change, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
     part2_quality_radio.change(
         fn=partial(_mark_part2_touched, key="quality"),
         inputs=[state, part2_quality_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        **event_kwargs(part2_quality_radio.change, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
     part2_artifact_radio.change(
         fn=partial(_mark_part2_touched, key="artifact"),
         inputs=[state, part2_artifact_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        **event_kwargs(part2_artifact_radio.change, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
 
     # Part 2 Next -> Save and advance
@@ -1532,8 +1464,9 @@ with gr.Blocks(**blocks_kwargs()) as app:
             part2_artifact_radio,
             part2_next_btn,
         ],
-        **event_kwargs(part2_next_btn.click, show_progress="hidden", show_api=False),
+        show_progress="hidden",
+        api_visibility="private",
     )
 
 if __name__ == "__main__":
-    app.launch(**launch_kwargs(app.launch))
+    app.launch(theme=APP_THEME, css=APP_CSS, head=TURNSTILE_HEAD, footer_links=["gradio", "settings"])
