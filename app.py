@@ -954,18 +954,21 @@ def update_sections_for_phase(state):
         return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
     return gr.update(), gr.update(), gr.update()
 
-def show_next_image_and_sections(state):
+def advance_emotion_phase(state):
     next_state, image_update, progress_update, choice_update, next_btn_update = show_next_image(state)
     main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(next_state)
+    phase = next_state.get("phase") if next_state else None
+    if phase == "part2_instructions":
+        print("[DEBUG] Transitioned from Part 1 to Part 2 instructions.")
     return (
         next_state,
+        main_update,
+        part2_instructions_update,
+        part2_section_update,
         image_update,
         progress_update,
         choice_update,
         next_btn_update,
-        main_update,
-        part2_instructions_update,
-        part2_section_update,
     )
 
 def on_emotion_select(state, selected_emotion):
@@ -1048,6 +1051,7 @@ def begin_part2(state):
     state["part2_index"] = -1
     state["part2_start_time"] = None
     state["part2_touched"] = {k: False for k in PART2_KEYS}
+    print("[DEBUG] Starting Part 2.")
     part2_outputs = show_next_part2_image(state)
     return (
         part2_outputs[0],
@@ -1370,17 +1374,17 @@ with gr.Blocks() as app:
 
     # Next Button -> Load New Image -> Reset Layout -> Trigger Animation
     next_image_btn.click(
-        fn=show_next_image_and_sections,
+        fn=advance_emotion_phase,
         inputs=[state],
         outputs=[
             state,
+            main_section,
+            part2_instructions_section,
+            part2_section,
             image_anim,
             progress_text,
             emotion_choice,
             next_image_btn,
-            main_section,
-            part2_instructions_section,
-            part2_section,
         ],
         show_progress="hidden",
         api_visibility="private",
@@ -1469,4 +1473,10 @@ with gr.Blocks() as app:
     )
 
 if __name__ == "__main__":
-    app.launch(theme=APP_THEME, css=APP_CSS, head=TURNSTILE_HEAD, footer_links=["gradio", "settings"])
+    app.launch(
+        theme=APP_THEME,
+        css=APP_CSS,
+        head=TURNSTILE_HEAD,
+        footer_links=["gradio", "settings"],
+        ssr_mode=False,
+    )
