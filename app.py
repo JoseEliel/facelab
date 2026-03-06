@@ -617,8 +617,6 @@ def _blocked_start_response(state, message, start_interactive=False):
         gr.update(visible=True),
         gr.update(visible=True, interactive=start_interactive),
         gr.update(visible=False),
-        gr.update(visible=False),
-        gr.update(visible=False),
         gr.update(),
         gr.update(value=message),
         gr.update(visible=False, interactive=False),
@@ -862,8 +860,6 @@ def begin_study(state, turnstile_token, request: gr.Request):
         gr.update(visible=False),
         gr.update(visible=False),
         gr.update(visible=True),
-        gr.update(visible=False),
-        gr.update(visible=False),
         gr.update(),
         gr.update(value="Human check passed."),
         image_update,
@@ -942,18 +938,32 @@ def show_next_image(state):
         gr.update(interactive=False, visible=True),
     )
 
-def update_sections_for_phase(state):
-    if not state:
-        return gr.update(), gr.update(), gr.update()
-    phase = state.get("phase")
-    if phase == "emotion":
-        return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
-    if phase == "part2_instructions":
+def advance_main_phase(state):
+    next_state, image_update, progress_update, choice_update, next_btn_update = show_next_image(state)
+    phase = next_state.get("phase") if next_state else None
+    show_intro = phase == "part2_instructions"
+    if show_intro:
         print("[DEBUG] Transitioned from Part 1 to Part 2 instructions.")
-        return gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
-    if phase in {"part2", "complete"}:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
-    return gr.update(), gr.update(), gr.update()
+    return (
+        next_state,
+        image_update,
+        gr.update(value=progress_update, visible=not show_intro),
+        choice_update,
+        next_btn_update,
+        gr.update(visible=show_intro),
+        gr.update(visible=show_intro),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(value="", visible=False),
+        gr.update(value="", visible=False),
+        gr.update(value="", visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+    )
 
 def on_emotion_select(state, selected_emotion):
     # Returns: [state, image_update, choices_interactive, next_btn_interactive]
@@ -1023,6 +1033,23 @@ def start_part2(state):
     print("[DEBUG] Starting Part 2.")
     return state
 
+def begin_part2(state):
+    next_state = start_part2(state)
+    part2_outputs = show_next_part2_image(next_state)
+    phase = part2_outputs[0].get("phase") if part2_outputs[0] else None
+    show_part2 = phase in {"part2", "complete"}
+    return (
+        part2_outputs[0],
+        gr.update(visible=False),
+        gr.update(value="", visible=False),
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=show_part2),
+        *part2_outputs[1:],
+    )
+
 def _no_part2_updates(state):
     # Returns: [state, part2_image, part2_progress_text, part2_status_text, part2_completion_text,
     #           part2_age_radio, part2_masc_radio, part2_attr_radio, part2_quality_radio, part2_artifact_radio,
@@ -1032,22 +1059,22 @@ def _no_part2_updates(state):
         gr.update(visible=False),
         gr.update(value="", visible=False),
         gr.update(value="", visible=False),
-        gr.update(),
-        gr.update(),
-        gr.update(),
-        gr.update(),
-        gr.update(),
-        gr.update(),
-        gr.update(),
+        gr.update(value="", visible=False),
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False, interactive=False),
+        gr.update(visible=False, interactive=False),
     )
 
 def _part2_reset_updates():
     return (
-        gr.update(value=None, interactive=True),  # part2_age_radio
-        gr.update(value=None, interactive=True),  # part2_masc_radio
-        gr.update(value=None, interactive=True),  # part2_attr_radio
-        gr.update(value=None, interactive=True),  # part2_quality_radio
-        gr.update(value=None, interactive=True),  # part2_artifact_radio
+        gr.update(value=None, interactive=True, visible=True),  # part2_age_radio
+        gr.update(value=None, interactive=True, visible=True),  # part2_masc_radio
+        gr.update(value=None, interactive=True, visible=True),  # part2_attr_radio
+        gr.update(value=None, interactive=True, visible=True),  # part2_quality_radio
+        gr.update(value=None, interactive=True, visible=True),  # part2_artifact_radio
     )
 
 def show_next_part2_image(state):
@@ -1069,12 +1096,12 @@ def show_next_part2_image(state):
             gr.update(value="", visible=False),
             gr.update(value="", visible=False),
             gr.update(value=completion_md, visible=True),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
+            gr.update(interactive=False, visible=False),
+            gr.update(interactive=False, visible=False),
+            gr.update(interactive=False, visible=False),
+            gr.update(interactive=False, visible=False),
+            gr.update(interactive=False, visible=False),
+            gr.update(interactive=False, visible=False),
         )
 
     image_data = images[index]
@@ -1097,7 +1124,7 @@ def show_next_part2_image(state):
         reset_updates[2],
         reset_updates[3],
         reset_updates[4],
-        gr.update(interactive=False),
+        gr.update(interactive=False, visible=True),
     )
 
 def _mark_part2_touched(state, _value, key):
@@ -1219,69 +1246,74 @@ with gr.Blocks() as app:
     with gr.Column(visible=False) as main_section:
         with gr.Group():
             image_anim = gr.Image(label="", elem_id="img_anim", height=400, width=400, interactive=False, show_label=False, visible=True)
-        
+
         progress_text = gr.Markdown("", elem_id="progress_text")
-        
+
         # Controls
         emotion_choice = gr.Radio(choices=[], label="Select the emotion", visible=False, interactive=True, elem_id="emotion_choice")
         next_image_btn = gr.Button("Next Image ▶", variant="secondary", visible=True, interactive=False, elem_id="next_btn")
 
-    # 3. Part 2 Instructions
-    with gr.Column(visible=False, elem_id="part2_instructions_section") as part2_instructions_section:
-        gr.Markdown(
-            "# Part 2\n"
-            "## You will now rate each face on several dimensions.\n"
-            "## Use the 1–7 scale for each item, then click Next Face ▶."
-        )
-        part2_start_btn = gr.Button("Start Part 2 ▶", variant="primary", elem_id="part2_start_btn")
+        with gr.Column(elem_id="part2_instructions_section"):
+            part2_intro_text = gr.Markdown(
+                "# Part 2\n"
+                "## You will now rate each face on several dimensions.\n"
+                "## Use the 1–7 scale for each item, then click Next Face ▶.",
+                visible="hidden",
+            )
+            part2_start_btn = gr.Button("Start Part 2 ▶", variant="primary", elem_id="part2_start_btn", visible="hidden")
 
-    # 4. Part 2: Rate The Images
-    with gr.Column(visible=False, elem_id="part2_section") as part2_section:
-        gr.Markdown(
-            "# Rate The Images\n"
-            "## Use the 1–7 scale for each item."
-        )
-        with gr.Row():
-            with gr.Column(scale=1):
-                part2_image = gr.Image(
-                    label="",
-                    height=400,
-                    width=400,
-                    interactive=False,
-                    show_label=False,
-                    visible=False,
-                )
-                part2_progress_text = gr.Markdown("", visible=False)
-                part2_status_text = gr.Markdown("", visible=False)
-                part2_completion_text = gr.Markdown("", elem_id="part2_completion_text", visible=False)
-            with gr.Column(scale=1):
-                part2_age_radio = gr.Radio(
-                    choices=SCALE_CHOICES,
-                    value=None,
-                    label="Perceived age (1 = very young, 7 = very old)",
-                )
-                part2_masc_radio = gr.Radio(
-                    choices=SCALE_CHOICES,
-                    value=None,
-                    label="Femininity–masculinity (1 = very feminine, 7 = very masculine)",
-                )
-                part2_attr_radio = gr.Radio(
-                    choices=SCALE_CHOICES,
-                    value=None,
-                    label="Attractiveness (1 = not at all, 7 = very attractive)",
-                )
-                part2_quality_radio = gr.Radio(
-                    choices=SCALE_CHOICES,
-                    value=None,
-                    label="Image quality (1 = very poor, 7 = excellent)",
-                )
-                part2_artifact_radio = gr.Radio(
-                    choices=SCALE_CHOICES,
-                    value=None,
-                    label="This image contains visual glitches or unnatural details.",
-                )
+        with gr.Column(elem_id="part2_section"):
+            part2_title = gr.Markdown(
+                "# Rate The Images\n"
+                "## Use the 1–7 scale for each item.",
+                visible="hidden",
+            )
+            with gr.Row():
+                with gr.Column(scale=1):
+                    part2_image = gr.Image(
+                        label="",
+                        height=400,
+                        width=400,
+                        interactive=False,
+                        show_label=False,
+                        visible="hidden",
+                    )
+                    part2_progress_text = gr.Markdown("", visible="hidden")
+                    part2_status_text = gr.Markdown("", visible="hidden")
+                    part2_completion_text = gr.Markdown("", elem_id="part2_completion_text", visible="hidden")
+                with gr.Column(scale=1):
+                    part2_age_radio = gr.Radio(
+                        choices=SCALE_CHOICES,
+                        value=None,
+                        label="Perceived age (1 = very young, 7 = very old)",
+                        visible="hidden",
+                    )
+                    part2_masc_radio = gr.Radio(
+                        choices=SCALE_CHOICES,
+                        value=None,
+                        label="Femininity–masculinity (1 = very feminine, 7 = very masculine)",
+                        visible="hidden",
+                    )
+                    part2_attr_radio = gr.Radio(
+                        choices=SCALE_CHOICES,
+                        value=None,
+                        label="Attractiveness (1 = not at all, 7 = very attractive)",
+                        visible="hidden",
+                    )
+                    part2_quality_radio = gr.Radio(
+                        choices=SCALE_CHOICES,
+                        value=None,
+                        label="Image quality (1 = very poor, 7 = excellent)",
+                        visible="hidden",
+                    )
+                    part2_artifact_radio = gr.Radio(
+                        choices=SCALE_CHOICES,
+                        value=None,
+                        label="This image contains visual glitches or unnatural details.",
+                        visible="hidden",
+                    )
 
-                part2_next_btn = gr.Button("Next Face ▶", variant="primary", interactive=False)
+                    part2_next_btn = gr.Button("Next Face ▶", variant="primary", interactive=False, visible="hidden")
 
     # --- Event Wiring ---
 
@@ -1309,8 +1341,6 @@ with gr.Blocks() as app:
             instructions_section,
             start_btn,
             main_section,
-            part2_instructions_section,
-            part2_section,
             status_text,
             human_check_status,
             image_anim,
@@ -1336,7 +1366,7 @@ with gr.Blocks() as app:
 
     # Next Button -> Load New Image -> Reset Layout -> Trigger Animation
     next_image_btn.click(
-        fn=show_next_image,
+        fn=advance_main_phase,
         inputs=[state],
         outputs=[
             state,
@@ -1344,41 +1374,37 @@ with gr.Blocks() as app:
             progress_text,
             emotion_choice,
             next_image_btn,
+            part2_intro_text,
+            part2_start_btn,
+            part2_title,
+            part2_image,
+            part2_progress_text,
+            part2_status_text,
+            part2_completion_text,
+            part2_age_radio,
+            part2_masc_radio,
+            part2_attr_radio,
+            part2_quality_radio,
+            part2_artifact_radio,
+            part2_next_btn,
         ],
         show_progress="hidden",
-        api_visibility="private",
-    ).then(
-        fn=update_sections_for_phase,
-        inputs=[state],
-        outputs=[
-            main_section,
-            part2_instructions_section,
-            part2_section,
-        ],
         api_visibility="private",
     )
 
     # Part 2 Start -> Show ratings block -> Load first rating image
     part2_start_btn.click(
-        fn=start_part2,
-        inputs=[state],
-        outputs=[state],
-        show_progress="hidden",
-        api_visibility="private",
-    ).then(
-        fn=update_sections_for_phase,
-        inputs=[state],
-        outputs=[
-            main_section,
-            part2_instructions_section,
-            part2_section,
-        ],
-        api_visibility="private",
-    ).then(
-        fn=show_next_part2_image,
+        fn=begin_part2,
         inputs=[state],
         outputs=[
             state,
+            image_anim,
+            progress_text,
+            emotion_choice,
+            next_image_btn,
+            part2_intro_text,
+            part2_start_btn,
+            part2_title,
             part2_image,
             part2_progress_text,
             part2_status_text,
