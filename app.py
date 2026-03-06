@@ -952,6 +952,20 @@ def update_sections_for_phase(state):
         return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
     return gr.update(), gr.update(), gr.update()
 
+def show_next_image_and_sections(state):
+    next_state, image_update, progress_update, choice_update, next_btn_update = show_next_image(state)
+    main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(next_state)
+    return (
+        next_state,
+        image_update,
+        progress_update,
+        choice_update,
+        next_btn_update,
+        main_update,
+        part2_instructions_update,
+        part2_section_update,
+    )
+
 def start_part2(state):
     if not is_verified_session(state):
         return state
@@ -1029,6 +1043,19 @@ def start_part2_phase(state):
     state["part2_start_time"] = None
     state["part2_touched"] = {k: False for k in PART2_KEYS}
     return state, gr.update(visible=False), gr.update(visible=True)
+
+def begin_part2(state):
+    next_state = start_part2(state)
+    next_state, _, _ = start_part2_phase(next_state)
+    main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(next_state)
+    part2_outputs = show_next_part2_image(next_state)
+    return (
+        part2_outputs[0],
+        main_update,
+        part2_instructions_update,
+        part2_section_update,
+        *part2_outputs[1:],
+    )
 
 def _no_part2_updates(state):
     # Returns: [state, part2_image, part2_progress_text, part2_status_text, part2_completion_text,
@@ -1343,52 +1370,31 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
 
     # Next Button -> Load New Image -> Reset Layout -> Trigger Animation
     next_image_btn.click(
-        fn=show_next_image,
-        inputs=[state],
-        outputs=[state, image_anim, progress_text, emotion_choice, next_image_btn],
-        show_progress="hidden",
-        api_visibility="private",
-    ).then(
-        fn=update_sections_for_phase,
+        fn=show_next_image_and_sections,
         inputs=[state],
         outputs=[
+            state,
+            image_anim,
+            progress_text,
+            emotion_choice,
+            next_image_btn,
             main_section,
             part2_instructions_section,
             part2_section,
         ],
+        show_progress="hidden",
         api_visibility="private",
     )
 
     # Part 2 Start -> Show ratings block -> Load first rating image
     part2_start_btn.click(
-        fn=start_part2,
-        inputs=[state],
-        outputs=[state],
-        show_progress="hidden",
-        api_visibility="private",
-    ).then(
-        fn=update_sections_for_phase,
+        fn=begin_part2,
         inputs=[state],
         outputs=[
+            state,
             main_section,
             part2_instructions_section,
             part2_section,
-        ],
-        api_visibility="private",
-    ).then(
-        fn=start_part2_phase,
-        inputs=[state],
-        outputs=[
-            state,
-            main_section,
-            part2_section,
-        ],
-        api_visibility="private",
-    ).then(
-        fn=show_next_part2_image,
-        inputs=[state],
-        outputs=[
-            state,
             part2_image,
             part2_progress_text,
             part2_status_text,
@@ -1400,6 +1406,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             part2_artifact_radio,
             part2_next_btn,
         ],
+        show_progress="hidden",
         api_visibility="private",
     )
 
