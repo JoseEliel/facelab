@@ -26,7 +26,6 @@ URL_PARAM_PARTICIPANT_ID = "pid"
 # Keep emotion order fixed across all participants.
 RANDOMIZE_EMOTION_ORDER_DEFAULT = False
 RANDOMIZE_EMOTION_ORDER_PARAM = "randomize"
-CHOICE_PLACEHOLDER = "Select an emotion..."
 TURNSTILE_SITE_KEY_ENV = "TURNSTILE_SITE_KEY"
 TURNSTILE_SECRET_KEY_ENV = "TURNSTILE_SECRET_KEY"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
@@ -38,41 +37,89 @@ ALLOWED_ANGLES = {"forward"}  # Restrict to front-facing stimuli.
 
 # --- CSS STYLES ---
 APP_CSS = f"""
-#emotion_choice, #emotion_choice .wrap {{ max-height: 260px; overflow-y: auto; }}
 #start_btn > button, 
 #next_btn > button {{
   font-size: 20px !important;
   padding: 12px 22px !important;
   min-height: 48px !important;
 }}
-#emotion_choice label,
-#emotion_choice .wrap label,
-#emotion_choice .wrap span {{
-  font-size: 20px !important;
+#emotion_choice {{
+  max-width: 760px;
+  margin: 0 auto;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}}
+#emotion_choice > div,
+#emotion_choice fieldset,
+#emotion_choice .form {{
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
 }}
 #emotion_choice .wrap {{
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: wrap !important;
-  justify-content: center !important;
-  align-items: center !important;
-  gap: 8px 12px;
-}}
-#emotion_choice .wrap label {{
-  justify-content: center;
-  width: auto;
-  margin: 4px 0;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 18px !important;
+  width: 100%;
+  background: transparent !important;
 }}
 #emotion_choice input[type="radio"] {{
-  transform: scale(1.2);
-  margin-right: 8px;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }}
 #emotion_choice .wrap label {{
-  padding: 8px 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-height: 120px !important;
+  margin: 0 !important;
+  padding: 20px !important;
+  border: 2px solid #4b5563 !important;
+  border-radius: 22px !important;
+  background: #6b7280 !important;
+  color: #ffffff !important;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}}
+#emotion_choice .wrap label:hover {{
+  transform: translateY(-1px);
+  border-color: #374151 !important;
+  background: #5b6472 !important;
+  box-shadow: 0 8px 20px rgba(31, 41, 55, 0.22);
+}}
+#emotion_choice .wrap label:has(input[type="radio"]:checked) {{
+  background: #374151 !important;
+  border-color: #111827 !important;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.28);
+}}
+#emotion_choice .wrap span {{
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: 34px !important;
+  font-weight: 700 !important;
+  line-height: 1.1;
+  color: #ffffff !important;
 }}
 
 @media (max-width: 640px) {{
   #img_anim img {{ max-height: 280px; object-fit: contain; }}
+  #emotion_choice .wrap {{
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+    gap: 12px !important;
+  }}
+  #emotion_choice .wrap label {{
+    min-height: 96px !important;
+    padding: 16px !important;
+  }}
+  #emotion_choice .wrap span {{
+    font-size: 26px !important;
+  }}
 }}
 
 #img_anim img {{
@@ -188,19 +235,17 @@ UNKNOWN_LABEL = "unknown"
 FILENAME_FIELD_ORDER = ["emotion"]
 
 # Fixed emotion set and order for all trials.
-EMOTION_CHOICES_ORDER = [
-    "neutral",
-    "happy",
-    "angry",
-    "afraid",
-    "disgusted",
-    "sad",
-    "surprised",
+EMOTION_CHOICES = [
+    ("Happy", "happy"),
+    ("Sad", "sad"),
+    ("Angry", "angry"),
+    ("Fear", "fear"),
 ]
+EMOTION_CHOICES_ORDER = [value for _, value in EMOTION_CHOICES]
 ALLOWED_EMOTIONS = set(EMOTION_CHOICES_ORDER)
 EMOTION_ALIASES = {
-    "fearful": "afraid",
-    "fear": "afraid",
+    "afraid": "fear",
+    "fearful": "fear",
 }
 
 # --- Stimulus Types ---
@@ -736,7 +781,7 @@ def initialize_experiment(request: gr.Request):
         "all_images": selected_images,
         "part2_images": [],
         # Fixed order across participants.
-        "emotions": list(EMOTION_CHOICES_ORDER),
+        "emotions": list(EMOTION_CHOICES),
         "current_index": -1,
         "current_choices": [],
         "randomize_emotions": RANDOMIZE_EMOTION_ORDER_DEFAULT,
@@ -886,13 +931,12 @@ def show_next_image(state):
     # Keep emotion order fixed across all trials and participants.
     choices = list(state["emotions"])
     state["current_choices"] = choices
-    choices_with_placeholder = [CHOICE_PLACEHOLDER] + choices
 
     return (
         state,
         gr.update(value=cropped_image, visible=True, interactive=False),
         f"Image {index + 1} of {len(state['all_images'])}",
-        gr.update(choices=choices_with_placeholder, value=CHOICE_PLACEHOLDER, visible=True, interactive=True),
+        gr.update(choices=choices, value=None, visible=True, interactive=True),
         gr.update(interactive=False, visible=True),
     )
 
@@ -924,8 +968,7 @@ def on_emotion_select(state, selected_emotion):
     # Returns: [state, image_update, choices_interactive, next_btn_interactive]
     if not is_verified_session(state):
         return state, gr.update(), gr.update(interactive=False), gr.update(interactive=False)
-    if not state or not selected_emotion or normalize_label(selected_emotion) == normalize_label(CHOICE_PLACEHOLDER):
-        # Do nothing if placeholder selected
+    if not state or not selected_emotion:
         return state, gr.update(), gr.update(), gr.update()
     
     try:
