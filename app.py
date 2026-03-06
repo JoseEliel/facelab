@@ -229,6 +229,22 @@ APP_CSS = f"""
   margin: 0 auto;
 }}
 
+#turnstile_token,
+#turnstile_token textarea,
+#turnstile_token input {{
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}}
+
 """
 
 # --- Constants & Mappings ---
@@ -1299,7 +1315,13 @@ with gr.Blocks(**blocks_kwargs()) as app:
     # 1. Landing Page
     with gr.Column(visible=True) as instructions_section:
         gr.Markdown("# Instructions\n ## Identify the emotion shown in each face.")
-        turnstile_token = gr.Textbox(value="", visible="hidden", elem_id="turnstile_token", render=True)
+        turnstile_token = gr.Textbox(
+            value="",
+            visible="hidden",
+            container=False,
+            elem_id="turnstile_token",
+            render=True,
+        )
         human_check_widget = gr.HTML(render_turnstile_widget(), visible=turnstile_is_enabled())
         human_check_status = gr.Markdown("")
         start_btn = gr.Button("START STUDY", variant="primary", elem_id="start_btn", interactive=False)
