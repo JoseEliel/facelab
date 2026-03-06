@@ -1337,6 +1337,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
     app.load(
         fn=initialize_experiment,
         outputs=[state, status_text, start_btn, human_check_status],
+        show_api=False,
     )
 
     turnstile_token.change(
@@ -1344,6 +1345,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
         inputs=[turnstile_token],
         outputs=[start_btn, human_check_status],
         show_progress="hidden",
+        show_api=False,
     )
 
     # Start Button -> Show Interface -> Load First Image -> Trigger Animation
@@ -1365,6 +1367,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             next_image_btn,
         ],
         show_progress="hidden",
+        show_api=False,
     ).then(
         fn=None,
         js="() => { if (window.resetTurnstileWidget) window.resetTurnstileWidget(); }",
@@ -1376,6 +1379,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
         inputs=[state, emotion_choice], 
         outputs=[state, image_anim, emotion_choice, next_image_btn],
         show_progress="hidden",
+        show_api=False,
     )
 
     # Next Button -> Load New Image -> Reset Layout -> Trigger Animation
@@ -1393,6 +1397,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             part2_section,
         ],
         show_progress="hidden",
+        show_api=False,
     )
 
     # Part 2 Start -> Show ratings block -> Load first rating image
@@ -1416,6 +1421,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             part2_next_btn,
         ],
         show_progress="hidden",
+        show_api=False,
     )
 
     # Part 2 gating: require interaction with all five ratings
@@ -1424,30 +1430,35 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
         inputs=[state, part2_age_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        show_api=False,
     )
     part2_masc_radio.change(
         fn=partial(_mark_part2_touched, key="masc"),
         inputs=[state, part2_masc_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        show_api=False,
     )
     part2_attr_radio.change(
         fn=partial(_mark_part2_touched, key="attr"),
         inputs=[state, part2_attr_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        show_api=False,
     )
     part2_quality_radio.change(
         fn=partial(_mark_part2_touched, key="quality"),
         inputs=[state, part2_quality_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        show_api=False,
     )
     part2_artifact_radio.change(
         fn=partial(_mark_part2_touched, key="artifact"),
         inputs=[state, part2_artifact_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
         show_progress="hidden",
+        show_api=False,
     )
 
     # Part 2 Next -> Save and advance
@@ -1468,7 +1479,8 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             part2_next_btn,
         ],
         show_progress="hidden",
+        show_api=False,
     )
 
 if __name__ == "__main__":
-    app.launch()
+    app.launch(show_api=False)
