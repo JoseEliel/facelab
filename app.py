@@ -289,8 +289,6 @@ PART2_HEADERS = [
     "matching_timestamp",
 ]
 
-VERIFIED_SESSION_IDS = set()
-
 # --- Data Structure ---
 class ImageData:
     def __init__(
@@ -606,8 +604,7 @@ def is_verified_session(state):
         return True
     if not state:
         return False
-    session_id = str(state.get("session_id") or "").strip()
-    return bool(session_id) and session_id in VERIFIED_SESSION_IDS and bool(state.get("human_verified"))
+    return bool(state.get("human_verified"))
 
 def _blocked_start_response(state, message, start_interactive=False):
     return (
@@ -802,9 +799,6 @@ def initialize_experiment(request: gr.Request):
     random.shuffle(part2_images)
     initial_state["part2_images"] = part2_images
 
-    if not turnstile_is_enabled():
-        VERIFIED_SESSION_IDS.add(session_id)
-
     start_enabled = bool(images) and not turnstile_is_enabled() and not turnstile_is_partially_configured()
     return (
         initial_state,
@@ -849,9 +843,6 @@ def begin_study(state, turnstile_token, request: gr.Request):
             start_interactive=bool(str(turnstile_token or "").strip()),
         )
 
-    session_id = str(state.get("session_id") or "").strip()
-    if session_id:
-        VERIFIED_SESSION_IDS.add(session_id)
     state["human_verified"] = True
 
     next_state, image_update, progress_value, choice_update, next_btn_update = show_next_image(state)
@@ -1312,7 +1303,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
                 part2_artifact_radio = gr.Radio(
                     choices=SCALE_CHOICES,
                     value=None,
-                    label="Artifacts / oddness (1 = none, 7 = a lot)",
+                    label="This image contains visual glitches or unnatural details.",
                 )
 
                 part2_next_btn = gr.Button("Next Face ▶", variant="primary", interactive=False)
