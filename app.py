@@ -949,27 +949,11 @@ def update_sections_for_phase(state):
     if phase == "emotion":
         return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
     if phase == "part2_instructions":
+        print("[DEBUG] Transitioned from Part 1 to Part 2 instructions.")
         return gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
     if phase in {"part2", "complete"}:
         return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
     return gr.update(), gr.update(), gr.update()
-
-def advance_emotion_phase(state):
-    next_state, image_update, progress_update, choice_update, next_btn_update = show_next_image(state)
-    main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(next_state)
-    phase = next_state.get("phase") if next_state else None
-    if phase == "part2_instructions":
-        print("[DEBUG] Transitioned from Part 1 to Part 2 instructions.")
-    return (
-        next_state,
-        main_update,
-        part2_instructions_update,
-        part2_section_update,
-        image_update,
-        progress_update,
-        choice_update,
-        next_btn_update,
-    )
 
 def on_emotion_select(state, selected_emotion):
     # Returns: [state, image_update, choices_interactive, next_btn_interactive]
@@ -1025,26 +1009,11 @@ def _to_int(value):
 
 # --- Part 2: Face Rating Logic ---
 
-def begin_part2(state):
-    main_update, part2_instructions_update, part2_section_update = update_sections_for_phase(state)
+def start_part2(state):
     if not is_verified_session(state):
-        empty_updates = _no_part2_updates(state)
-        return (
-            state,
-            main_update,
-            part2_instructions_update,
-            part2_section_update,
-            *empty_updates[1:],
-        )
+        return state
     if not state or state.get("phase") != "part2_instructions":
-        empty_updates = _no_part2_updates(state)
-        return (
-            state,
-            main_update,
-            part2_instructions_update,
-            part2_section_update,
-            *empty_updates[1:],
-        )
+        return state
 
     state["phase"] = "part2"
     state["part2_started"] = True
@@ -1052,14 +1021,7 @@ def begin_part2(state):
     state["part2_start_time"] = None
     state["part2_touched"] = {k: False for k in PART2_KEYS}
     print("[DEBUG] Starting Part 2.")
-    part2_outputs = show_next_part2_image(state)
-    return (
-        part2_outputs[0],
-        gr.update(visible=False),
-        gr.update(visible=False),
-        gr.update(visible=True),
-        *part2_outputs[1:],
-    )
+    return state
 
 def _no_part2_updates(state):
     # Returns: [state, part2_image, part2_progress_text, part2_status_text, part2_completion_text,
@@ -1374,13 +1336,10 @@ with gr.Blocks() as app:
 
     # Next Button -> Load New Image -> Reset Layout -> Trigger Animation
     next_image_btn.click(
-        fn=advance_emotion_phase,
+        fn=show_next_image,
         inputs=[state],
         outputs=[
             state,
-            main_section,
-            part2_instructions_section,
-            part2_section,
             image_anim,
             progress_text,
             emotion_choice,
@@ -1388,17 +1347,38 @@ with gr.Blocks() as app:
         ],
         show_progress="hidden",
         api_visibility="private",
+    ).then(
+        fn=update_sections_for_phase,
+        inputs=[state],
+        outputs=[
+            main_section,
+            part2_instructions_section,
+            part2_section,
+        ],
+        api_visibility="private",
     )
 
     # Part 2 Start -> Show ratings block -> Load first rating image
     part2_start_btn.click(
-        fn=begin_part2,
+        fn=start_part2,
+        inputs=[state],
+        outputs=[state],
+        show_progress="hidden",
+        api_visibility="private",
+    ).then(
+        fn=update_sections_for_phase,
         inputs=[state],
         outputs=[
-            state,
             main_section,
             part2_instructions_section,
             part2_section,
+        ],
+        api_visibility="private",
+    ).then(
+        fn=show_next_part2_image,
+        inputs=[state],
+        outputs=[
+            state,
             part2_image,
             part2_progress_text,
             part2_status_text,
