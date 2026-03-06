@@ -1473,7 +1473,13 @@ with gr.Blocks() as app:
     )
 
 if __name__ == "__main__":
+    # Gradio 6 performs a HEAD request against the local root URL during launch.
+    # On Hugging Face Spaces this check can fail even after startup-events succeed,
+    # which aborts launch before the app is served. share=True skips that check,
+    # and Gradio immediately disables actual share tunnels on Spaces.
+    launch_share = bool(os.getenv("SPACE_ID"))
     app.launch(
+        share=launch_share,
         theme=APP_THEME,
         css=APP_CSS,
         head=TURNSTILE_HEAD,
