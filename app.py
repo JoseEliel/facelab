@@ -10,6 +10,7 @@ import csv
 import json
 import uuid
 import shutil
+import inspect
 from datetime import datetime
 from functools import partial
 from urllib import parse, request as urlrequest
@@ -388,6 +389,47 @@ TURNSTILE_HEAD = """
 })();
 </script>
 """ if turnstile_site_key() else None
+
+APP_THEME = gr.themes.Soft()
+
+def gradio_major_version():
+    raw_version = str(getattr(gr, "__version__", "0"))
+    try:
+        return int(raw_version.split(".", 1)[0])
+    except Exception:
+        return 0
+
+def supported_kwargs(callable_obj, **kwargs):
+    try:
+        params = inspect.signature(callable_obj).parameters
+    except (TypeError, ValueError):
+        return kwargs
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key in params}
+
+def blocks_kwargs():
+    if gradio_major_version() >= 6:
+        return {}
+    return supported_kwargs(
+        gr.Blocks,
+        theme=APP_THEME,
+        css=APP_CSS,
+        head=TURNSTILE_HEAD,
+    )
+
+def launch_kwargs(launch_fn):
+    kwargs = {"show_api": False}
+    if gradio_major_version() >= 6:
+        kwargs.update(
+            theme=APP_THEME,
+            css=APP_CSS,
+            head=TURNSTILE_HEAD,
+        )
+    return supported_kwargs(launch_fn, **kwargs)
+
+def event_kwargs(event_fn, **kwargs):
+    return supported_kwargs(event_fn, **kwargs)
 
 def canonicalize_emotion(label):
     norm = normalize_label(label)
@@ -1250,7 +1292,7 @@ def advance_part2(state, age_rating, masc_rating, attr_rating, quality_rating, a
     return show_next_part2_image(state)
 
 # --- Gradio App ---
-with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
+with gr.Blocks(**blocks_kwargs()) as app:
     state = gr.State()
     gr.Markdown("Face Emotion Recognition Study", elem_id="app_title")
     
@@ -1337,15 +1379,14 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
     app.load(
         fn=initialize_experiment,
         outputs=[state, status_text, start_btn, human_check_status],
-        show_api=False,
+        **event_kwargs(app.load, show_api=False),
     )
 
     turnstile_token.change(
         fn=on_turnstile_token_change,
         inputs=[turnstile_token],
         outputs=[start_btn, human_check_status],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(turnstile_token.change, show_progress="hidden", show_api=False),
     )
 
     # Start Button -> Show Interface -> Load First Image -> Trigger Animation
@@ -1366,8 +1407,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             emotion_choice,
             next_image_btn,
         ],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(start_btn.click, show_progress="hidden", show_api=False),
     ).then(
         fn=None,
         js="() => { if (window.resetTurnstileWidget) window.resetTurnstileWidget(); }",
@@ -1378,8 +1418,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
         fn=on_emotion_select, 
         inputs=[state, emotion_choice], 
         outputs=[state, image_anim, emotion_choice, next_image_btn],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(emotion_choice.change, show_progress="hidden", show_api=False),
     )
 
     # Next Button -> Load New Image -> Reset Layout -> Trigger Animation
@@ -1396,8 +1435,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             part2_instructions_section,
             part2_section,
         ],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(next_image_btn.click, show_progress="hidden", show_api=False),
     )
 
     # Part 2 Start -> Show ratings block -> Load first rating image
@@ -1420,8 +1458,7 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             part2_artifact_radio,
             part2_next_btn,
         ],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(part2_start_btn.click, show_progress="hidden", show_api=False),
     )
 
     # Part 2 gating: require interaction with all five ratings
@@ -1429,36 +1466,31 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
         fn=partial(_mark_part2_touched, key="age"),
         inputs=[state, part2_age_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(part2_age_radio.change, show_progress="hidden", show_api=False),
     )
     part2_masc_radio.change(
         fn=partial(_mark_part2_touched, key="masc"),
         inputs=[state, part2_masc_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(part2_masc_radio.change, show_progress="hidden", show_api=False),
     )
     part2_attr_radio.change(
         fn=partial(_mark_part2_touched, key="attr"),
         inputs=[state, part2_attr_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(part2_attr_radio.change, show_progress="hidden", show_api=False),
     )
     part2_quality_radio.change(
         fn=partial(_mark_part2_touched, key="quality"),
         inputs=[state, part2_quality_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(part2_quality_radio.change, show_progress="hidden", show_api=False),
     )
     part2_artifact_radio.change(
         fn=partial(_mark_part2_touched, key="artifact"),
         inputs=[state, part2_artifact_radio],
         outputs=[state, part2_next_btn, part2_status_text, part2_completion_text],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(part2_artifact_radio.change, show_progress="hidden", show_api=False),
     )
 
     # Part 2 Next -> Save and advance
@@ -1478,9 +1510,8 @@ with gr.Blocks(theme=gr.themes.Soft(), css=APP_CSS, head=TURNSTILE_HEAD) as app:
             part2_artifact_radio,
             part2_next_btn,
         ],
-        show_progress="hidden",
-        show_api=False,
+        **event_kwargs(part2_next_btn.click, show_progress="hidden", show_api=False),
     )
 
 if __name__ == "__main__":
-    app.launch(show_api=False)
+    app.launch(**launch_kwargs(app.launch))
