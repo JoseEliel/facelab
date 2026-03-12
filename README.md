@@ -22,3 +22,20 @@ This app now supports optional bot protection with Cloudflare Turnstile.
 5. Restart the Space.
 
 If both variables are missing, the app still runs without Turnstile.
+
+## Deploying under a subpath
+
+If the app is published at a URL such as `https://research.speldesign.uu.se/facelab`, set
+`GRADIO_ROOT_PATH=/facelab` before starting the container. Gradio uses this to build the
+correct asset and API URLs when it is served behind a reverse proxy instead of directly from
+the domain root.
+
+Example:
+
+```bash
+GRADIO_ROOT_PATH=/facelab docker compose up -d
+```
+
+If your proxy does not forward the usual `Host` and `X-Forwarded-*` headers, you can set
+`GRADIO_ROOT_PATH` to the full public URL instead, for example
+`https://research.speldesign.uu.se/facelab`.

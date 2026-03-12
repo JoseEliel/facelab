@@ -1,1 +1,6 @@
 participant_id,session_id,stimulus_id,stimulus_type,target_emotion,matching_trial_index,match_age_rating,match_masc_rating,match_attr_rating,match_quality_rating,match_artifact_rating,matching_timestamp
+anon-d0da4a89-3191-4b6a-ae78-15720aa8803b,d0da4a89-3191-4b6a-ae78-15720aa8803b,woman2_happy,ai_kdef_like,happy,1,2,3,3,3,3,2026-03-06T11:59:11.152319
+anon-d0da4a89-3191-4b6a-ae78-15720aa8803b,d0da4a89-3191-4b6a-ae78-15720aa8803b,man_angry,real_kdef,angry,2,4,4,4,5,5,2026-03-06T11:59:16.923899
+anon-d0da4a89-3191-4b6a-ae78-15720aa8803b,d0da4a89-3191-4b6a-ae78-15720aa8803b,woman_fearful,real_kdef,fear,3,3,5,3,2,3,2026-03-06T11:59:21.635244
+anon-d0da4a89-3191-4b6a-ae78-15720aa8803b,d0da4a89-3191-4b6a-ae78-15720aa8803b,oldman_angry,ai_kdef_like,angry,4,3,2,3,3,3,2026-03-06T11:59:24.887611
+anon-d0da4a89-3191-4b6a-ae78-15720aa8803b,d0da4a89-3191-4b6a-ae78-15720aa8803b,woman_happy,real_kdef,happy,5,2,2,3,3,3,2026-03-06T11:59:29.010320

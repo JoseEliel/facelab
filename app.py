@@ -1484,8 +1484,11 @@ if __name__ == "__main__":
     # which aborts launch before the app is served. share=True skips that check,
     # and Gradio immediately disables actual share tunnels on Spaces.
     launch_share = bool(os.getenv("SPACE_ID"))
+    # Support reverse proxies that publish the app under a subpath such as /facelab.
+    launch_root_path = os.getenv("GRADIO_ROOT_PATH") or None
     app.launch(
         share=launch_share,
+        root_path=launch_root_path,
         theme=APP_THEME,
         css=APP_CSS,
         head=TURNSTILE_HEAD,

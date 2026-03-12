@@ -3,6 +3,9 @@ services:
     container_name: facelab
     build: .
     restart: unless-stopped
+    environment:
+      # Set this to /facelab when the app is exposed behind a reverse-proxy subpath.
+      GRADIO_ROOT_PATH: ${GRADIO_ROOT_PATH:-}
     ports:
       - "7860:7860"
     volumes:
