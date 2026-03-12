@@ -336,25 +336,27 @@ def turnstile_is_partially_configured():
 def render_turnstile_widget():
     if not turnstile_is_enabled():
         return ""
-    site_key = turnstile_site_key()
-    return f"""
+    return """
 <div id="human_check_wrap">
-  <div
-    class="cf-turnstile"
-    data-sitekey="{site_key}"
-    data-callback="onTurnstileSuccess"
-    data-expired-callback="onTurnstileExpired"
-    data-error-callback="onTurnstileError">
-  </div>
+  <div id="turnstile_widget"></div>
 </div>
 """
 
 TURNSTILE_HEAD = """
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script>
 (() => {
+  const siteKey = %s;
+  let turnstileWidgetId = null;
+  let renderedNode = null;
+  let observer = null;
+  let renderScheduled = false;
+
   function getTurnstileInput() {
     return document.querySelector("#turnstile_token textarea, #turnstile_token input");
+  }
+
+  function getTurnstileMount() {
+    return document.querySelector("#turnstile_widget");
   }
 
   function dispatchTurnstileValue(value) {
@@ -371,25 +373,118 @@ TURNSTILE_HEAD = """
 
   window.onTurnstileExpired = function() {
     dispatchTurnstileValue("");
+    if (window.turnstile && turnstileWidgetId !== null) {
+      try {
+        window.turnstile.reset(turnstileWidgetId);
+        return;
+      } catch (_error) {
+      }
+    }
+    window.renderTurnstileWidget();
   };
 
-  window.onTurnstileError = function() {
+  window.onTurnstileError = function(errorCode) {
+    console.error("Turnstile error:", errorCode);
     dispatchTurnstileValue("");
+    return false;
   };
+
+  function clearWidgetReference() {
+    turnstileWidgetId = null;
+    renderedNode = null;
+  }
+
+  function renderTurnstileWidget() {
+    const mount = getTurnstileMount();
+    if (!mount || !siteKey) return false;
+    if (!window.turnstile || typeof window.turnstile.render !== "function") return false;
+
+    if (renderedNode && renderedNode !== mount) {
+      try {
+        if (turnstileWidgetId !== null) {
+          window.turnstile.remove(turnstileWidgetId);
+        }
+      } catch (_error) {
+      }
+      clearWidgetReference();
+    }
+
+    if (renderedNode === mount && turnstileWidgetId !== null) {
+      return true;
+    }
+
+    dispatchTurnstileValue("");
+    mount.replaceChildren();
+
+    try {
+      turnstileWidgetId = window.turnstile.render(mount, {
+        sitekey: siteKey,
+        callback: window.onTurnstileSuccess,
+        "expired-callback": window.onTurnstileExpired,
+        "error-callback": window.onTurnstileError,
+      });
+      renderedNode = mount;
+      return true;
+    } catch (error) {
+      console.error("Turnstile render failed:", error);
+      clearWidgetReference();
+      return false;
+    }
+  }
+
+  function scheduleTurnstileRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    window.requestAnimationFrame(() => {
+      renderScheduled = false;
+      renderTurnstileWidget();
+    });
+  }
+
+  window.onTurnstileApiLoad = function() {
+    scheduleTurnstileRender();
+  };
+
+  window.renderTurnstileWidget = scheduleTurnstileRender;
 
   window.resetTurnstileWidget = function() {
     dispatchTurnstileValue("");
-    if (!window.turnstile) return;
-    document.querySelectorAll(".cf-turnstile").forEach((node) => {
+    if (window.turnstile && turnstileWidgetId !== null) {
       try {
-        window.turnstile.reset(node);
+        window.turnstile.reset(turnstileWidgetId);
+        return;
       } catch (_error) {
       }
-    });
+    }
+    clearWidgetReference();
+    scheduleTurnstileRender();
   };
+
+  function startTurnstileObserver() {
+    if (observer) return;
+    const root = document.documentElement || document.body;
+    if (!root) return;
+    observer = new MutationObserver(() => {
+      scheduleTurnstileRender();
+    });
+    observer.observe(root, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      startTurnstileObserver();
+      scheduleTurnstileRender();
+    }, { once: true });
+  } else {
+    startTurnstileObserver();
+    scheduleTurnstileRender();
+  }
+
+  window.addEventListener("load", scheduleTurnstileRender);
 })();
 </script>
-""" if turnstile_site_key() else None
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileApiLoad" defer></script>
+""" % json.dumps(turnstile_site_key()) if turnstile_site_key() else None
 
 APP_THEME = gr.themes.Soft()
 
