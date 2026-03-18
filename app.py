@@ -29,6 +29,7 @@ RANDOMIZE_EMOTION_ORDER_PARAM = "randomize"
 TURNSTILE_SITE_KEY_ENV = "TURNSTILE_SITE_KEY"
 TURNSTILE_SECRET_KEY_ENV = "TURNSTILE_SECRET_KEY"
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+DOWNLOAD_PASSWORD_ENV = "CSV_DOWNLOAD_PASSWORD"
 
 # --- Sampling Config ---
 BALANCE_SUBSET_DEFAULT = True
@@ -260,6 +261,22 @@ APP_CSS = f"""
 
 #human_check_wrap .cf-turnstile {{
   margin: 0 auto;
+}}
+
+#download_sidebar {{
+  border-left: 1px solid #d1d5db;
+}}
+
+#download_sidebar h2 {{
+  margin-top: 0 !important;
+}}
+
+#unlock_downloads_btn > button {{
+  width: 100%;
+}}
+
+#download_status {{
+  min-height: 24px;
 }}
 
 """
@@ -670,6 +687,39 @@ def ensure_csv_files():
     status_lines.extend(statuses)
     status_msg = "\n".join(status_lines)
     return part1_file, part2_file, status_msg
+
+def get_downloadable_csv_files():
+    return [path for path in [PART1_CSV_FILE, PART2_CSV_FILE, METADATA_FILE] if os.path.exists(path)]
+
+def unlock_downloads(password):
+    expected = str(os.getenv(DOWNLOAD_PASSWORD_ENV) or "").strip()
+    if not expected:
+        return (
+            gr.update(value=f"Download access is not configured. Set `{DOWNLOAD_PASSWORD_ENV}` on the server.", visible=True),
+            gr.update(value=None, visible=False),
+            gr.update(value=""),
+        )
+
+    if str(password or "") != expected:
+        return (
+            gr.update(value="Incorrect password.", visible=True),
+            gr.update(value=None, visible=False),
+            gr.update(value=""),
+        )
+
+    files = get_downloadable_csv_files()
+    if not files:
+        return (
+            gr.update(value="No CSV files are available yet.", visible=True),
+            gr.update(value=None, visible=False),
+            gr.update(value=""),
+        )
+
+    return (
+        gr.update(value=f"Downloads unlocked. {len(files)} file(s) available.", visible=True),
+        gr.update(value=files, visible=True),
+        gr.update(value=""),
+    )
 
 def get_participant_id(request):
     if request is None: return ""
@@ -1360,6 +1410,26 @@ def advance_part2(state, age_rating, masc_rating, attr_rating, quality_rating, a
 # --- Gradio App ---
 with gr.Blocks() as app:
     state = gr.State()
+
+    with gr.Sidebar(label="Data Downloads", open=False, position="right", width=340, elem_id="download_sidebar"):
+        gr.Markdown(
+            "## Data Downloads\n"
+            "Enter the password to unlock the CSV files."
+        )
+        download_password = gr.Textbox(
+            label="Password",
+            type="password",
+            placeholder="Enter download password",
+            elem_id="download_password",
+        )
+        unlock_downloads_btn = gr.Button("Unlock Downloads", variant="secondary", elem_id="unlock_downloads_btn")
+        download_status = gr.Markdown("", visible=False, elem_id="download_status")
+        download_files = gr.File(
+            label="Available CSV files",
+            file_count="multiple",
+            interactive=False,
+            visible=False,
+        )
     
     # 1. Landing Page
     with gr.Column(visible=True, elem_id="instructions_section") as instructions_section:
@@ -1457,6 +1527,22 @@ with gr.Blocks() as app:
         fn=on_turnstile_token_change,
         inputs=[turnstile_token],
         outputs=[start_btn, human_check_status],
+        show_progress="hidden",
+        api_visibility="private",
+    )
+
+    unlock_downloads_btn.click(
+        fn=unlock_downloads,
+        inputs=[download_password],
+        outputs=[download_status, download_files, download_password],
+        show_progress="hidden",
+        api_visibility="private",
+    )
+
+    download_password.submit(
+        fn=unlock_downloads,
+        inputs=[download_password],
+        outputs=[download_status, download_files, download_password],
         show_progress="hidden",
         api_visibility="private",
     )
@@ -1646,5 +1732,5 @@ if __name__ == "__main__":
         theme=APP_THEME,
         css=APP_CSS,
         head=TURNSTILE_HEAD,
-        footer_links=["gradio", "settings"],
+        footer_links=["gradio"],
     )
