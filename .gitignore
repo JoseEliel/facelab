@@ -26,5 +26,8 @@ env/
 .DS_Store
 Thumbs.db
 
+# Generated study data
+emotion_responses_part*.csv
+
 # Git
 .gitattributes

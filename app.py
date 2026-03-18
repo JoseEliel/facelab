@@ -120,6 +120,15 @@ APP_CSS = f"""
   #emotion_choice .wrap span {{
     font-size: 26px !important;
   }}
+  #app_title h1 {{
+    font-size: 24px !important;
+  }}
+  #instructions_heading h1 {{
+    font-size: 28px !important;
+  }}
+  #instructions_heading h2 {{
+    font-size: 18px !important;
+  }}
 }}
 
 #img_anim img {{
@@ -205,15 +214,40 @@ APP_CSS = f"""
 }}
 
 #app_title {{
+  margin: 0 0 6px 0 !important;
+  padding: 0 !important;
   text-align: center;
-  margin-bottom: 16px;
+  overflow: visible !important;
 }}
 
-#app_title h1,
-#app_title p {{
-  font-weight: 700;
-  font-size: 56px;
-  margin: 0;
+#app_title > div {{
+  overflow: visible !important;
+}}
+
+#app_title h1 {{
+  margin: 0 !important;
+  font-size: 28px !important;
+  font-weight: 700 !important;
+  line-height: 1.1 !important;
+}}
+
+#instructions_section {{
+  max-width: 760px;
+  margin: 0 auto;
+}}
+
+#instructions_heading {{
+  text-align: center;
+}}
+
+#instructions_heading h1 {{
+  font-size: 40px !important;
+  margin: 0 0 8px !important;
+}}
+
+#instructions_heading h2 {{
+  font-size: 24px !important;
+  margin: 0 !important;
 }}
 
 #human_check_wrap {{
@@ -1030,7 +1064,7 @@ def show_next_image(state):
         gr.update(value=cropped_image, visible=True, interactive=False),
         f"Image {index + 1} of {len(state['all_images'])}",
         gr.update(choices=choices, value=None, visible=True, interactive=True),
-        gr.update(interactive=False, visible=True),
+        gr.update(interactive=False, visible=False),
     )
 
 def advance_main_phase(state):
@@ -1094,12 +1128,12 @@ def on_emotion_select(state, selected_emotion):
     except Exception as e:
         print(f"Error saving CSV: {e}")
 
-    # Hide Animated, Show Static (Snap), Disable Dropdown, Enable Next
+    # Freeze the current response while the follow-up event advances automatically.
     return (
         state,
         gr.update(visible=True, interactive=False),
         gr.update(interactive=False),
-        gr.update(interactive=True),
+        gr.update(interactive=False, visible=False),
     )
 
 # --- Part 2 Helpers ---
@@ -1326,11 +1360,11 @@ def advance_part2(state, age_rating, masc_rating, attr_rating, quality_rating, a
 # --- Gradio App ---
 with gr.Blocks() as app:
     state = gr.State()
-    gr.Markdown("Face Emotion Recognition Study", elem_id="app_title")
     
     # 1. Landing Page
-    with gr.Column(visible=True) as instructions_section:
-        gr.Markdown("# Instructions\n ## Identify the emotion shown in each face.")
+    with gr.Column(visible=True, elem_id="instructions_section") as instructions_section:
+        gr.HTML("<h1>Face Emotion Recognition Study</h1>", elem_id="app_title")
+        gr.Markdown("# Instructions\n ## Identify the emotion shown in each face.", elem_id="instructions_heading")
         turnstile_token = gr.Textbox(value="", visible="hidden", elem_id="turnstile_token", render=True)
         human_check_widget = gr.HTML(render_turnstile_widget(), visible=turnstile_is_enabled())
         human_check_status = gr.Markdown("")
@@ -1346,7 +1380,7 @@ with gr.Blocks() as app:
 
         # Controls
         emotion_choice = gr.Radio(choices=[], label="Select the emotion", visible=False, interactive=True, elem_id="emotion_choice")
-        next_image_btn = gr.Button("Next Image ▶", variant="secondary", visible=True, interactive=False, elem_id="next_btn")
+        next_image_btn = gr.Button("Next Image ▶", variant="secondary", visible=False, interactive=False, elem_id="next_btn")
 
         with gr.Column(elem_id="part2_instructions_section"):
             part2_intro_text = gr.Markdown(
@@ -1450,11 +1484,36 @@ with gr.Blocks() as app:
         js="() => { if (window.resetTurnstileWidget) window.resetTurnstileWidget(); }",
     )
 
-    # Emotion Selected -> Swap Images (Snap to Clear) -> Save Data
-    emotion_choice.change(
+    # Emotion Selected -> Save Data -> Advance automatically
+    emotion_choice.input(
         fn=on_emotion_select, 
         inputs=[state, emotion_choice], 
         outputs=[state, image_anim, emotion_choice, next_image_btn],
+        show_progress="hidden",
+        api_visibility="private",
+    ).then(
+        fn=advance_main_phase,
+        inputs=[state],
+        outputs=[
+            state,
+            image_anim,
+            progress_text,
+            emotion_choice,
+            next_image_btn,
+            part2_intro_text,
+            part2_start_btn,
+            part2_title,
+            part2_image,
+            part2_progress_text,
+            part2_status_text,
+            part2_completion_text,
+            part2_age_radio,
+            part2_masc_radio,
+            part2_attr_radio,
+            part2_quality_radio,
+            part2_artifact_radio,
+            part2_next_btn,
+        ],
         show_progress="hidden",
         api_visibility="private",
     )
