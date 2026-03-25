@@ -1508,7 +1508,7 @@ with gr.Blocks() as app:
                     part2_artifact_radio = gr.Radio(
                         choices=SCALE_CHOICES,
                         value=None,
-                        label="This image contains visual glitches or unnatural details.",
+                        label="This image contains visual glitches or unnatural details. (1 = strongly disagree, 7 = strongly agree)",
                         visible="hidden",
                     )
 
