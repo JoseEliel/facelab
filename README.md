@@ -23,6 +23,14 @@ This app now supports optional bot protection with Cloudflare Turnstile.
 
 If both variables are missing, the app still runs without Turnstile.
 
+## Dataset Layout
+
+The app reads all stimuli from a single `dataset/` directory.
+
+- Place every image file directly inside `dataset/`
+- Keep `stimuli_metadata.csv` in `dataset/stimuli_metadata.csv`
+- Use the `face_type` column in the metadata to distinguish `human` and `ai` stimuli
+
 ## Deploying under a subpath
 
 If the app is published at a URL such as `https://research.speldesign.uu.se/facelab`, set
