@@ -368,8 +368,8 @@ FILENAME_FIELD_ORDER = ["emotion"]
 EMOTION_CHOICES = [
     ("Happy", "happy"),
     ("Sad", "sad"),
-    ("Angry", "angry"),
-    ("Fear", "fear"),
+    ("Angry", "anger"),
+    ("Afraid", "fear"),
 ]
 EMOTION_CHOICES_ORDER = [value for _, value in EMOTION_CHOICES]
 ALLOWED_EMOTIONS = set(EMOTION_CHOICES_ORDER)
