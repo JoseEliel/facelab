@@ -1,0 +1,17 @@
+image_name,emotion,sex,ethnicity,angle,face_type
+AF11HAS.JPG,happy,female,unknown,forward,human
+BF24SAS.JPG,sad,female,unknown,forward,human
+BF19AFS.JPG,fear,female,unknown,forward,human
+BF09ANS.JPG,anger,female,unknown,forward,human
+BM25HAS.JPG,happy,male,unknown,forward,human
+BM08SAS.JPG,sad,male,unknown,forward,human
+BM29AFS.JPG,fear,male,unknown,forward,human
+AM05ANS.JPG,anger,male,unknown,forward,human
+ai_happy_female_c04_seed1004076139.png,happy,female,unknown,forward,ai
+ai_sad_female_c01_seed2222069061.png,sad,female,unknown,forward,ai
+ai_fear_female_c03_seed228646595.png,fear,female,unknown,forward,ai
+ai_anger_female_c04_seed2651709112.png,anger,female,unknown,forward,ai
+ai_happy_male_c02_seed335366950.png,happy,male,unknown,forward,ai
+ai_sad_male_c01_seed3605583618.png,sad,male,unknown,forward,ai
+ai_fear_male_c03_seed2740765083.png,fear,male,unknown,forward,ai
+ai_anger_male_c02_seed1570596979.png,anger,male,unknown,forward,ai

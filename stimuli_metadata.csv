@@ -1,7 +1,0 @@
-image_name,emotion,sex,ethnicity,angle,face_type
-man_angry.png,angry,male,black,forward,human
-woman_fearful.png,afraid,female,caucasian,forward,human
-woman_happy.png,happy,female,caucasian,forward,human
-kid_surprised.png,surprised,female,caucasian,forward,ai
-woman2_happy.png,happy,female,black,forward,ai
-oldman_angry.png,angry,male,caucasian,forward,ai

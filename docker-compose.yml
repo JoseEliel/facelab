@@ -9,6 +9,4 @@ services:
     ports:
       - "7860:7860"
     volumes:
-      - ./AI:/app/AI
-      - ./Human:/app/Human
-      - ./stimuli_metadata.csv:/app/stimuli_metadata.csv
+      - ./dataset:/app/dataset

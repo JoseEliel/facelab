@@ -3,7 +3,6 @@ os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
 
 import gradio as gr
 import cv2
-import numpy as np
 import random
 import time
 import csv
@@ -15,11 +14,10 @@ from functools import partial
 from urllib import parse, request as urlrequest
 
 # --- Configuration ---
-AI_FOLDER = "./AI"
-HUMAN_FOLDER = "./Human"
+DATASET_FOLDER = "./dataset"
 PART1_CSV_FILE = "emotion_responses_part1.csv"
 PART2_CSV_FILE = "emotion_responses_part2.csv"
-METADATA_FILE = "stimuli_metadata.csv"
+METADATA_FILE = os.path.join(DATASET_FOLDER, "stimuli_metadata.csv")
 
 # --- Advanced Features Config ---
 URL_PARAM_PARTICIPANT_ID = "pid"
@@ -35,6 +33,10 @@ DOWNLOAD_PASSWORD_ENV = "CSV_DOWNLOAD_PASSWORD"
 BALANCE_SUBSET_DEFAULT = True
 MAX_PER_STRATUM = None  # Optionally set to an int to cap trials per (type, emotion)
 ALLOWED_ANGLES = {"forward"}  # Restrict to front-facing stimuli.
+FACE_CROP_TARGET_RATIO = 0.5  # Keep detected faces at a similar scale within the square crop.
+FACE_CROP_Y_BIAS = 0.08  # Shift the crop slightly upward to keep more forehead than torso.
+EYE_DISTANCE_TARGET_RATIO = 0.3  # Prefer a stable eye-to-frame width ratio when eyes are detected.
+EYE_LINE_POSITION_RATIO = 0.40  # Place the detected eye line around 40%% down from the top of the crop.
 
 # --- CSS STYLES ---
 APP_CSS = f"""
@@ -582,18 +584,18 @@ def resolve_field(metadata, filename_fields, key, default=UNKNOWN_LABEL):
     if not value: value = filename_fields.get(key, "")
     return value or default
 
-def resolve_face_type(metadata, source):
-    if metadata and metadata.get("face_type"): return normalize_label(metadata.get("face_type"))
-    return normalize_label(source)
+def resolve_face_type(metadata, default=UNKNOWN_LABEL):
+    if metadata and metadata.get("face_type"):
+        return normalize_label(metadata.get("face_type"))
+    return normalize_label(default) or UNKNOWN_LABEL
 
-def resolve_stimulus_type(face_type, source):
-    ft = normalize_label(face_type) or normalize_label(source)
+def resolve_stimulus_type(face_type):
+    ft = normalize_label(face_type)
     if ft in {"human", "real", "real-kdef", "real_kdef"}:
         return STIMULUS_TYPE_REAL
     if ft in {"ai", "synthetic", "ai-kdef-like", "ai_kdef_like"}:
         return STIMULUS_TYPE_AI
-    # Fall back to folder/source label.
-    return STIMULUS_TYPE_REAL if normalize_label(source) == "human" else STIMULUS_TYPE_AI
+    return UNKNOWN_LABEL
 
 def make_stimulus_id(filename):
     stem = os.path.splitext(os.path.basename(filename))[0]
@@ -820,49 +822,53 @@ def scan_images():
     skipped_missing_emotion = []
     skipped_angle = []
     skipped_emotion = []
+    if not os.path.exists(DATASET_FOLDER):
+        return images, emotions
 
-    for folder, source in [(AI_FOLDER, "AI"), (HUMAN_FOLDER, "Human")]:
-        if not os.path.exists(folder): continue
-        for filename in os.listdir(folder):
-            if not filename.lower().endswith(('.jpg', '.jpeg', '.png')): continue
-            path = os.path.join(folder, filename)
-            meta_key = filename.lower()
-            meta = metadata.get(meta_key) or metadata.get(os.path.splitext(meta_key)[0]) or {}
-            filename_fields = parse_filename_fields(path)
+    for filename in os.listdir(DATASET_FOLDER):
+        if not filename.lower().endswith((".jpg", ".jpeg", ".png")):
+            continue
+        path = os.path.join(DATASET_FOLDER, filename)
+        if not os.path.isfile(path):
+            continue
 
-            emotion_raw = resolve_field(meta, filename_fields, "emotion", "")
-            emotion = canonicalize_emotion(emotion_raw)
-            if not emotion or emotion == UNKNOWN_LABEL:
-                skipped_missing_emotion.append(filename)
-                continue
-            if emotion not in ALLOWED_EMOTIONS:
-                skipped_emotion.append((filename, emotion_raw))
-                continue
+        meta_key = filename.lower()
+        meta = metadata.get(meta_key) or metadata.get(os.path.splitext(meta_key)[0]) or {}
+        filename_fields = parse_filename_fields(path)
 
-            sex = resolve_field(meta, filename_fields, "sex", UNKNOWN_LABEL)
-            ethnicity = resolve_field(meta, filename_fields, "ethnicity", UNKNOWN_LABEL)
-            angle = resolve_field(meta, filename_fields, "angle", UNKNOWN_LABEL)
-            if ALLOWED_ANGLES and angle not in ALLOWED_ANGLES:
-                skipped_angle.append((filename, angle))
-                continue
-            face_type = resolve_face_type(meta, source) or UNKNOWN_LABEL
-            stimulus_type = resolve_stimulus_type(face_type, source)
-            stimulus_id = make_stimulus_id(filename)
+        emotion_raw = resolve_field(meta, filename_fields, "emotion", "")
+        emotion = canonicalize_emotion(emotion_raw)
+        if not emotion or emotion == UNKNOWN_LABEL:
+            skipped_missing_emotion.append(filename)
+            continue
+        if emotion not in ALLOWED_EMOTIONS:
+            skipped_emotion.append((filename, emotion_raw))
+            continue
 
-            emotions.add(emotion)
-            images.append(
-                ImageData(
-                    path,
-                    source,
-                    emotion,
-                    sex=sex,
-                    ethnicity=ethnicity,
-                    angle=angle,
-                    face_type=face_type,
-                    stimulus_type=stimulus_type,
-                    stimulus_id=stimulus_id,
-                )
+        sex = resolve_field(meta, filename_fields, "sex", UNKNOWN_LABEL)
+        ethnicity = resolve_field(meta, filename_fields, "ethnicity", UNKNOWN_LABEL)
+        angle = resolve_field(meta, filename_fields, "angle", UNKNOWN_LABEL)
+        if ALLOWED_ANGLES and angle not in ALLOWED_ANGLES:
+            skipped_angle.append((filename, angle))
+            continue
+        face_type = resolve_face_type(meta)
+        stimulus_type = resolve_stimulus_type(face_type)
+        stimulus_id = make_stimulus_id(filename)
+
+        emotions.add(emotion)
+        images.append(
+            ImageData(
+                path,
+                face_type,
+                emotion,
+                sex=sex,
+                ethnicity=ethnicity,
+                angle=angle,
+                face_type=face_type,
+                stimulus_type=stimulus_type,
+                stimulus_id=stimulus_id,
             )
+        )
     
     if skipped_missing_emotion:
         print(f"[DEBUG] Skipped {len(skipped_missing_emotion)} images without emotion label.")
@@ -882,42 +888,108 @@ def crop_face(image_path, target_size=512):
     if not os.path.exists(image_path): return None
     img = cv2.imread(image_path)
     if img is None: return None
-    
+
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-    cropped = img
-    
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    img_h, img_w = img.shape[:2]
+
+    side = min(img_w, img_h)
+    center_x = img_w / 2
+    center_y = img_h / 2
+
     if os.path.exists(cascade_path):
         face_cascade = cv2.CascadeClassifier(cascade_path)
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        detection_inputs = [gray, cv2.equalizeHist(gray)]
+        faces = ()
+        for detection_gray in detection_inputs:
+            faces = face_cascade.detectMultiScale(
+                detection_gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+            )
+            if len(faces) > 0:
+                break
+
         if len(faces) > 0:
             x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-            padding = int(0.3 * w)
-            x, y = max(0, x - padding), max(0, y - padding)
-            w, h = min(img.shape[1] - x, w + 2 * padding), min(img.shape[0] - y, h + 2 * padding)
-            cropped = img[y:y+h, x:x+w]
+            center_x = x + (w / 2)
+            center_y = y + (h / 2) - (FACE_CROP_Y_BIAS * h)
 
-    h, w, _ = cropped.shape
-    if h > w:
-        new_h = target_size
-        new_w = int(w * (target_size / h))
-    else:
-        new_w = target_size
-        new_h = int(h * (target_size / w))
-    
-    resized_img = cv2.resize(cropped, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    canvas = np.zeros((target_size, target_size, 3), dtype=np.uint8)
-    y_offset = (target_size - new_h) // 2
-    x_offset = (target_size - new_w) // 2
-    canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized_img
-    
-    return cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+            eye_pair = None
+            eye_region = gray[y:y + int(h * 0.7), x:x + w]
+            if eye_region.size > 0:
+                for eye_cascade_name in ("haarcascade_eye_tree_eyeglasses.xml", "haarcascade_eye.xml"):
+                    eye_cascade_path = cv2.data.haarcascades + eye_cascade_name
+                    if not os.path.exists(eye_cascade_path):
+                        continue
+
+                    eye_cascade = cv2.CascadeClassifier(eye_cascade_path)
+                    eyes = eye_cascade.detectMultiScale(
+                        eye_region,
+                        scaleFactor=1.05,
+                        minNeighbors=6,
+                    )
+                    eye_candidates = []
+                    for ex, ey, ew, eh in eyes:
+                        cx = x + ex + (ew / 2)
+                        cy = y + ey + (eh / 2)
+                        if cy >= y + (h * 0.62):
+                            continue
+                        eye_candidates.append((cx, cy, ew, eh))
+
+                    best_score = None
+                    for i in range(len(eye_candidates)):
+                        for j in range(i + 1, len(eye_candidates)):
+                            left, right = sorted((eye_candidates[i], eye_candidates[j]), key=lambda eye: eye[0])
+                            dx = right[0] - left[0]
+                            dy = abs(right[1] - left[1])
+                            if dx <= w * 0.2 or dx >= w * 0.9:
+                                continue
+                            size_diff = abs((left[2] * left[3]) - (right[2] * right[3])) / max(left[2] * left[3], right[2] * right[3], 1)
+                            score = dx - (2.5 * dy) - (dx * size_diff)
+                            if best_score is None or score > best_score:
+                                best_score = score
+                                eye_pair = (left, right)
+
+                    if eye_pair is not None:
+                        break
+
+            if eye_pair is not None:
+                left_eye, right_eye = eye_pair
+                eye_mid_x = (left_eye[0] + right_eye[0]) / 2
+                eye_mid_y = (left_eye[1] + right_eye[1]) / 2
+                eye_distance = right_eye[0] - left_eye[0]
+                eye_ratio = max(0.1, min(0.9, EYE_DISTANCE_TARGET_RATIO))
+                side = min(int(round(eye_distance / eye_ratio)), img_w, img_h)
+                eye_line = max(0.1, min(0.9, EYE_LINE_POSITION_RATIO))
+                center_x = eye_mid_x
+                center_y = eye_mid_y + ((0.5 - eye_line) * side)
+            else:
+                face_size = max(w, h)
+                target_ratio = max(0.1, min(0.95, FACE_CROP_TARGET_RATIO))
+                side = min(int(round(face_size / target_ratio)), img_w, img_h)
+
+    side = max(1, side)
+    x1 = int(round(center_x - (side / 2)))
+    y1 = int(round(center_y - (side / 2)))
+    x1 = max(0, min(img_w - side, x1))
+    y1 = max(0, min(img_h - side, y1))
+    x2 = x1 + side
+    y2 = y1 + side
+
+    cropped = img[y1:y2, x1:x2]
+    if cropped.size == 0:
+        return None
+
+    interpolation = cv2.INTER_AREA if side >= target_size else cv2.INTER_CUBIC
+    resized_img = cv2.resize(cropped, (target_size, target_size), interpolation=interpolation)
+
+    return cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
 
 # --- Backend Logic ---
 
 def initialize_experiment(request: gr.Request):
-    os.makedirs(AI_FOLDER, exist_ok=True)
-    os.makedirs(HUMAN_FOLDER, exist_ok=True)
+    os.makedirs(DATASET_FOLDER, exist_ok=True)
     images, emotions = scan_images()
     
     if not images:
@@ -1508,7 +1580,8 @@ with gr.Blocks() as app:
                     part2_artifact_radio = gr.Radio(
                         choices=SCALE_CHOICES,
                         value=None,
-                        label="This image contains visual glitches or unnatural details. (1 = strongly disagree, 7 = strongly agree)",
+                        label="This image contains visual glitches or unnatural details.",
+                        info="(1 = strongly disagree, 7 = strongly agree)",
                         visible="hidden",
                     )
 
