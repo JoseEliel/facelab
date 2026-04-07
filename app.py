@@ -111,7 +111,31 @@ APP_CSS = f"""
 }}
 
 @media (max-width: 640px) {{
-  #img_anim img {{ max-height: 280px; object-fit: contain; }}
+  #img_anim,
+  #part2_image {{
+    width: min(92vw, 360px) !important;
+  }}
+  #part2_section .wrap {{
+    gap: 6px !important;
+    justify-content: space-between;
+  }}
+  #part2_section .wrap label {{
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: 0 0 calc((100% - 36px) / 7);
+    min-width: 0;
+    padding: 6px 4px !important;
+    font-size: 16px !important;
+    white-space: nowrap;
+  }}
+  #part2_section .wrap span {{
+    font-size: 16px !important;
+  }}
+  #part2_section input[type="radio"] {{
+    transform: scale(1.05);
+    margin-right: 4px;
+  }}
   #emotion_choice .wrap {{
     grid-template-columns: repeat(2, minmax(140px, 1fr));
     gap: 12px !important;
@@ -134,10 +158,19 @@ APP_CSS = f"""
   }}
 }}
 
-#img_anim img {{
+#img_anim,
+#part2_image {{
+  width: min(100%, 420px);
+  margin: 0 auto;
+}}
+
+#img_anim img,
+#part2_image img {{
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
+  height: auto !important;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
 }}
 
 #progress_text {{
@@ -214,6 +247,11 @@ APP_CSS = f"""
 
 #part2_section .wrap label {{
   padding: 6px 10px !important;
+}}
+
+#part2_artifact_radio [data-testid="block-info"] {{
+  white-space: pre-line;
+  max-width: 100%;
 }}
 
 #app_title {{
@@ -1516,7 +1554,7 @@ with gr.Blocks() as app:
     # 2. Main Experiment Interface
     with gr.Column(visible=False) as main_section:
         with gr.Group():
-            image_anim = gr.Image(label="", elem_id="img_anim", height=400, width=400, interactive=False, show_label=False, visible=True)
+            image_anim = gr.Image(label="", elem_id="img_anim", interactive=False, show_label=False, visible=True)
 
         progress_text = gr.Markdown("", elem_id="progress_text")
 
@@ -1535,16 +1573,14 @@ with gr.Blocks() as app:
 
         with gr.Column(elem_id="part2_section"):
             part2_title = gr.Markdown(
-                "# Rate The Images\n"
-                "## Use the 1–7 scale for each item.",
+                "# Rate The Images",
                 visible="hidden",
             )
             with gr.Row():
                 with gr.Column(scale=1):
                     part2_image = gr.Image(
                         label="",
-                        height=400,
-                        width=400,
+                        elem_id="part2_image",
                         interactive=False,
                         show_label=False,
                         visible="hidden",
@@ -1580,8 +1616,8 @@ with gr.Blocks() as app:
                     part2_artifact_radio = gr.Radio(
                         choices=SCALE_CHOICES,
                         value=None,
-                        label="This image contains visual glitches or unnatural details.",
-                        info="(1 = strongly disagree, 7 = strongly agree)",
+                        label="This image contains visual glitches or unnatural details.\n(1 = strongly disagree, 7 = strongly agree)",
+                        elem_id="part2_artifact_radio",
                         visible="hidden",
                     )
 
