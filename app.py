@@ -114,36 +114,6 @@ APP_CSS = f"""
   #img_anim {{
     width: min(92vw, 360px) !important;
   }}
-  #part2_image {{
-    width: min(78vw, 320px) !important;
-  }}
-  #part2_section .wrap {{
-    display: grid !important;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px !important;
-    justify-content: stretch;
-  }}
-  #part2_section .wrap label {{
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    width: 100% !important;
-    min-height: 52px !important;
-    min-width: 0;
-    padding: 0 !important;
-    font-size: 15px !important;
-    white-space: nowrap;
-  }}
-  #part2_section .wrap span {{
-    font-size: 15px !important;
-  }}
-  #part2_section h1 {{
-    font-size: 32px !important;
-    line-height: 1.05 !important;
-  }}
-  #part2_section h2 {{
-    font-size: 18px !important;
-  }}
   #emotion_choice .wrap {{
     grid-template-columns: repeat(2, minmax(140px, 1fr));
     gap: 12px !important;
@@ -291,6 +261,36 @@ APP_CSS = f"""
 #part2_artifact_radio [data-testid="block-info"] {{
   white-space: pre-line;
   max-width: 100%;
+}}
+
+@media (max-width: 640px) {{
+  #part2_image {{
+    width: min(78vw, 320px) !important;
+  }}
+  #part2_section .wrap {{
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px !important;
+    justify-content: stretch;
+  }}
+  #part2_section .wrap label {{
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 52px !important;
+    padding: 0 !important;
+    font-size: 15px !important;
+    white-space: nowrap;
+  }}
+  #part2_section .wrap label > span {{
+    font-size: 15px !important;
+  }}
+  #part2_section h1 {{
+    font-size: 32px !important;
+    line-height: 1.05 !important;
+  }}
+  #part2_section h2 {{
+    font-size: 18px !important;
+  }}
 }}
 
 #app_title {{
