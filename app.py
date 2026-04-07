@@ -111,30 +111,38 @@ APP_CSS = f"""
 }}
 
 @media (max-width: 640px) {{
-  #img_anim,
-  #part2_image {{
+  #img_anim {{
     width: min(92vw, 360px) !important;
   }}
+  #part2_image {{
+    width: min(78vw, 320px) !important;
+  }}
   #part2_section .wrap {{
-    gap: 6px !important;
-    justify-content: space-between;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px !important;
+    justify-content: stretch;
   }}
   #part2_section .wrap label {{
-    display: flex !important;
+    display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    flex: 0 0 calc((100% - 36px) / 7);
+    width: 100% !important;
+    min-height: 52px !important;
     min-width: 0;
-    padding: 6px 4px !important;
-    font-size: 16px !important;
+    padding: 0 !important;
+    font-size: 15px !important;
     white-space: nowrap;
   }}
   #part2_section .wrap span {{
-    font-size: 16px !important;
+    font-size: 15px !important;
   }}
-  #part2_section input[type="radio"] {{
-    transform: scale(1.05);
-    margin-right: 4px;
+  #part2_section h1 {{
+    font-size: 32px !important;
+    line-height: 1.05 !important;
+  }}
+  #part2_section h2 {{
+    font-size: 18px !important;
   }}
   #emotion_choice .wrap {{
     grid-template-columns: repeat(2, minmax(140px, 1fr));
@@ -240,13 +248,44 @@ APP_CSS = f"""
   gap: 8px 12px;
 }}
 
-#part2_section input[type="radio"] {{
-  transform: scale(1.35);
-  margin-right: 8px;
+#part2_section .wrap label {{
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 56px;
+  min-height: 56px !important;
+  padding: 0 !important;
+  border: 1px solid #64748b !important;
+  border-radius: 14px !important;
+  background: #5b6472 !important;
+  color: #ffffff !important;
+  box-sizing: border-box;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }}
 
-#part2_section .wrap label {{
-  padding: 6px 10px !important;
+#part2_section .wrap label:hover {{
+  background: #4b5563 !important;
+  border-color: #334155 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+}}
+
+#part2_section .wrap label.selected {{
+  background: #1f2937 !important;
+  border-color: #0f172a !important;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.26);
+}}
+
+#part2_section .wrap label > input[type="radio"] {{
+  display: none !important;
+}}
+
+#part2_section .wrap label > span {{
+  margin-left: 0 !important;
+  width: 100%;
+  text-align: center;
+  font-weight: 700;
+  line-height: 1;
 }}
 
 #part2_artifact_radio [data-testid="block-info"] {{
