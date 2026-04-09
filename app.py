@@ -134,6 +134,16 @@ APP_CSS = f"""
   #instructions_heading h2 {{
     font-size: 18px !important;
   }}
+  #study_consent {{
+    padding: 18px 16px;
+    border-radius: 16px;
+  }}
+  #study_consent h2 {{
+    font-size: 24px !important;
+  }}
+  #study_consent p {{
+    font-size: 15px !important;
+  }}
 }}
 
 #img_anim,
@@ -330,6 +340,43 @@ APP_CSS = f"""
   margin: 0 !important;
 }}
 
+#study_consent {{
+  max-width: 760px;
+  margin: 20px auto 0 auto;
+  padding: 24px 28px;
+  border: 1px solid #d1d5db;
+  border-radius: 20px;
+  background: #f8fafc;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}}
+
+#study_consent h2 {{
+  margin-top: 0 !important;
+  margin-bottom: 16px !important;
+  font-size: 30px !important;
+  color: #0f172a !important;
+}}
+
+#study_consent p {{
+  margin: 0 0 14px 0 !important;
+  line-height: 1.6 !important;
+  font-size: 16px !important;
+  color: #0f172a !important;
+}}
+
+#study_consent strong {{
+  color: #0f172a !important;
+}}
+
+#study_consent a {{
+  color: #1d4ed8 !important;
+  text-decoration: underline !important;
+}}
+
+#study_consent a:hover {{
+  color: #1e40af !important;
+}}
+
 #human_check_wrap {{
   margin-top: 16px;
   display: flex;
@@ -420,6 +467,26 @@ PART2_HEADERS = [
 ]
 
 VERIFIED_SESSION_IDS = set()
+
+STUDY_CONSENT_MARKDOWN = """
+## Thank you for participating in the study!
+
+**Purpose of the Study:** You are invited to participate in a research study investigating face perception. Your honest responses to each question are extremely valuable and help us understand how people process images of human faces. All adults (at least 18 years of age) are eligible to participate, regardless of background.
+
+**Procedures:** If you choose to participate, you will answer multiple-choice questions about different faces. This study is expected to take approximately 10 minutes to complete.
+
+**Potential Risks and Benefits:** It is unlikely that you will experience any risks or discomfort beyond what you would experience in everyday life by participating. There are no specific benefits associated with participating.
+
+**Confidentiality:** The data collected in this study is completely anonymous. No personally identifiable information will be collected, and the information you choose to provide in this study cannot be connected back to you. Survey data (numerical data arrays) will be made available in publications, but without information that could identify participants. Uppsala University is responsible for the secure storage and handling of personal data on a locally secured computer. Data will be saved for 10 years. Your answers and results will be processed to prevent unauthorized access.
+
+**Voluntary Participation:** Your participation in this study is voluntary, and you may choose to end your participation at any time. If you decide not to participate or wish to end your participation, you do not need to state why, and it will not affect your future care or treatment.
+
+**Project Results:** Information about the results of the study will be published in academic peer-reviewed journals and linked on the department's website, [https://www.uu.se/en/department/game-design/research/games--society-lab](https://www.uu.se/en/department/game-design/research/games--society-lab)
+
+**Ethical Approval:** The methods and protocol of the study are conducted in accordance with the standards specified in the 1964 Declaration of Helsinki and approved by the local ethics committee, The Swedish Ethical Review Authority.
+
+By clicking **Next**, you acknowledge that you have read and understood the information provided above and voluntarily agree to participate in this study. Thank you for your participation!
+"""
 
 # --- Data Structure ---
 class ImageData:
@@ -814,7 +881,7 @@ def get_request_ip(request):
 
 def turnstile_status_text():
     if turnstile_is_enabled():
-        return "Complete the human check to enable Start."
+        return "Complete the human check to enable Next."
     if turnstile_is_partially_configured():
         return (
             f"Turnstile is misconfigured. Set both `{TURNSTILE_SITE_KEY_ENV}` "
@@ -831,7 +898,7 @@ def verify_turnstile_token(token, request):
 
     token = str(token or "").strip()
     if not token:
-        return False, "Please complete the human check before starting."
+        return False, "Please complete the human check before continuing."
 
     payload = {
         "secret": turnstile_secret_key(),
@@ -1217,7 +1284,7 @@ def on_turnstile_token_change(token):
     return (
         gr.update(interactive=has_token),
         gr.update(
-            value="Human check complete. Click Start." if has_token else "Complete the human check to enable Start."
+            value="Human check complete. Click Next." if has_token else "Complete the human check to enable Next."
         ),
     )
 
@@ -1584,10 +1651,11 @@ with gr.Blocks() as app:
     with gr.Column(visible=True, elem_id="instructions_section") as instructions_section:
         gr.HTML("<h1>Face Emotion Recognition Study</h1>", elem_id="app_title")
         gr.Markdown("# Instructions\n ## Identify the emotion shown in each face.", elem_id="instructions_heading")
+        gr.Markdown(STUDY_CONSENT_MARKDOWN, elem_id="study_consent")
         turnstile_token = gr.Textbox(value="", visible="hidden", elem_id="turnstile_token", render=True)
         human_check_widget = gr.HTML(render_turnstile_widget(), visible=turnstile_is_enabled())
         human_check_status = gr.Markdown("")
-        start_btn = gr.Button("START STUDY", variant="primary", elem_id="start_btn", interactive=False)
+        start_btn = gr.Button("Next", variant="primary", elem_id="start_btn", interactive=False)
         status_text = gr.Markdown("")
 
     # 2. Main Experiment Interface
